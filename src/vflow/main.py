@@ -64,6 +64,23 @@ def archive(
     actions.archive_file(shoot, file, tags, keep_log, work_ssd_dest, archive_hdd_dest)
 
 @app.command()
+def create_select(
+    shoot: str = typer.Option(..., "--shoot", "-n", help="Name of the shoot"),
+    file: str = typer.Option(..., "--file", "-f", help="Filename of the exported video to create a select from"),
+    tags: str = typer.Option(..., "--tags", "-t", help="Comma-separated metadata tags"),
+):
+    """
+    Creates a graded select, archiving it and copying it to the local SSD for reuse.
+    """
+    typer.echo(f"Creating select for '{file}' from shoot '{shoot}'...")
+    
+    app_config = config.load_config()
+    work_ssd_dest = config.get_location(app_config, "work_ssd")
+    archive_hdd_dest = config.get_location(app_config, "archive_hdd")
+    
+    actions.create_select_file(shoot, file, tags, work_ssd_dest, archive_hdd_dest)
+
+@app.command()
 def consolidate(
     source: str = typer.Option(..., "--source", "-s", help="Source directory to scan for unique files"),
     output_folder: str = typer.Option(..., "--output-folder", "-o", help="Name of the folder to create in the archive for unique media"),
