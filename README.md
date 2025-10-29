@@ -13,7 +13,9 @@ v-flow is designed around a professional media workflow that separates your stor
 The lifecycle of a project looks like this:
 
 1.  **`ingest`**: Copy new footage from an SD card. It's immediately backed up to your archive and your local ingest folder.
-2.  **`prep`**: Move a specific shoot from the ingest folder to your fast work SSD. This creates a standardized project structure for editing.
+2.  **`prep`** or **`pull`**: Move/copy a shoot to your fast work SSD.
+    - Use **`prep`** when files are in the laptop ingest folder (moves files).
+    - Use **`pull`** when files are already archived (copies from archive, useful for working with older footage or creating quick edits like TikTok).
 3.  **Edit & Grade**: Work on your project. As you create reusable, graded clips, use the `create-select` command.
 4.  **`create-select`**: Tag a graded clip and save it for future use. A copy is sent to the archive for permanent storage, and another is placed in your project's `05_Graded_Selects` folder on your SSD for immediate access.
 5.  **`archive`**: When a project is complete, use this command on the final export. It tags the file, sends it to the archive, and cleans up the original source files from your SSD, freeing up space.
@@ -57,11 +59,51 @@ You MUST edit the file to point to your actual storage locations (laptop, work S
 
 ### `v-flow prep`
 *   **Purpose:** Prepares a shoot for editing by moving it to your fast work SSD. It creates a standard project structure: `01_Source`, `02_Resolve`, `03_Exports`, `04_FinalRenders`, and `05_Graded_Selects`.
-*   **Prerequisites:** The shoot must have been ingested first.
+*   **Prerequisites:** The shoot must be in the laptop ingest folder (from `ingest`).
 *   **Usage:**
     ```bash
     v-flow prep --shoot <YYYY-MM-DD_ShootName>
     ```
+*   **Note:** This **moves** files from ingest to work SSD. If your files are already archived and not in the ingest folder, use `pull` instead.
+
+### `v-flow pull`
+*   **Purpose:** Pulls files from archive to your work SSD for editing. Copies (doesn't move) files so they remain safely in archive. Perfect for working with archived footage or creating quick edits like TikTok videos.
+*   **Prerequisites:** The shoot must exist in the archive (at `/Video/RAW/[shoot_name]` for raw, or `/Video/Graded_Selects/[shoot_name]` for selects).
+*   **Options:**
+    - `--shoot, -n` (required): Name of the shoot to pull from archive.
+    - `--source, -s` (optional, default: `raw`): What to pull:
+        - `raw`: Pull raw files from `Video/RAW/` → `01_Source/` (default)
+        - `selects`: Pull graded selects from `Video/Graded_Selects/` → `05_Graded_Selects/`
+        - `both`: Pull both raw files and graded selects to their respective folders
+    - `--files, -f` (optional): Specific filenames, patterns, or ranges to pull. Can be specified multiple times. Supports ranges like `C3317-C3351` (matches C3317 through C3351). If omitted, pulls all video files from the selected source(s).
+*   **Usage:**
+    - Pull all raw files (for full grade):
+      ```bash
+      v-flow pull --shoot 2025-10-12_Germany_Trip --source raw
+      ```
+    - Pull only graded selects (for quick TikTok edit):
+      ```bash
+      v-flow pull --shoot 2025-10-12_Germany_Trip --source selects
+      ```
+    - Pull both raw and graded selects:
+      ```bash
+      v-flow pull --shoot 2025-10-12_Germany_Trip --source both
+      ```
+    - Pull specific files with filter (works with any source type):
+      ```bash
+      v-flow pull --shoot 2025-10-12_Germany_Trip --source selects --files "sunset" --files "beach"
+      ```
+    - Pull a range of files (e.g., C3317 to C3351):
+      ```bash
+      v-flow pull --shoot Germany --source raw --files "C3317-C3351"
+      ```
+*   **Behavior:**
+    - Creates standard project structure on work SSD.
+    - Raw files → `01_Source/` folder
+    - Graded selects → `05_Graded_Selects/` folder
+    - Files remain in archive (copy operation, not move).
+    - Skips files that already exist (based on filename and size).
+    - If a source directory doesn't exist, shows warning and continues with available sources.
 
 ### `v-flow create-select` (New!)
 *   **Purpose:** Creates a reusable, tagged, graded clip from an export. It archives a copy to `/Video/Graded_Selects/` and places another copy in your active project's `05_Graded_Selects` folder on your SSD for immediate use.

@@ -3,6 +3,8 @@ import typer
 from pathlib import Path
 import subprocess
 from datetime import date
+from typing import Optional
+import re
 from . import utils_date
 
 def copy_and_verify(source: Path, dest: Path):
@@ -104,6 +106,97 @@ def _is_duplicate(file_path: Path, dest_dir: Path) -> bool:
         return source_size == dest_size
     except Exception:
         return False
+
+def _extract_number_from_filename(filename: str) -> Optional[int]:
+    """
+    Extract the first numeric sequence from a filename.
+    Returns the number as an integer, or None if no number found.
+    Handles zero-padding by extracting the numeric value.
+    """
+    match = re.search(r'(\d+)', filename)
+    if match:
+        return int(match.group(1))
+    return None
+
+def _parse_range_pattern(pattern: str) -> tuple[Optional[str], Optional[int], Optional[int]]:
+    """
+    Parse a range pattern like "C3317-C3351" or "3317-3351" or "C3317-3351".
+    Returns (prefix, start_num, end_num) or (None, None, None) if not a range.
+    """
+    # Pattern to match ranges like "C3317-C3351" or "3317-3351" or "C3317-3351"
+    # The pattern can have a prefix before the first number, and optionally before the second
+    pattern_upper = pattern.upper()
+    
+    # Try pattern with prefix on both sides: "C3317-C3351"
+    range_match = re.match(r'^([A-Za-z]*?)(\d+)-([A-Za-z]*?)(\d+)$', pattern_upper)
+    if range_match:
+        prefix1 = range_match.group(1) if range_match.group(1) else None
+        prefix2 = range_match.group(3) if range_match.group(3) else None
+        
+        # Use the prefix from the first number, but require both to match (or both be None)
+        if (prefix1 is None and prefix2 is None) or (prefix1 and prefix2 and prefix1 == prefix2):
+            prefix = prefix1
+            start_num = int(range_match.group(2))
+            end_num = int(range_match.group(4))
+            
+            if start_num <= end_num:
+                return (prefix, start_num, end_num)
+    
+    # Try pattern with no prefix: "3317-3351" or with prefix only on first: "C3317-3351"
+    # This regex allows digits after the dash, and will capture prefix from first number only
+    range_match = re.match(r'^([A-Za-z]*?)(\d+)-(\d+)$', pattern_upper)
+    if range_match:
+        prefix = range_match.group(1) if range_match.group(1) else None
+        start_num = int(range_match.group(2))
+        end_num = int(range_match.group(3))
+        
+        if start_num <= end_num:
+            return (prefix, start_num, end_num)
+    
+    return (None, None, None)  # Not a range
+
+def _matches_pattern(pattern: str, filename: str) -> bool:
+    """
+    Check if a filename matches a pattern, handling both regular patterns and ranges.
+    Uses numeric comparison to handle zero-padding.
+    """
+    filename_lower = filename.lower()
+    pattern_lower = pattern.lower()
+    
+    # First, check if pattern is a range
+    prefix, start_num, end_num = _parse_range_pattern(pattern)
+    if start_num is not None and end_num is not None:
+        # It's a range - extract number from filename and check if in range
+        file_num = _extract_number_from_filename(filename)
+        if file_num is None:
+            return False
+        
+        # If prefix specified, check that filename contains the prefix
+        if prefix:
+            if prefix.lower() not in filename_lower:
+                return False
+        
+        # Check if number is in range
+        return start_num <= file_num <= end_num
+    
+    # Not a range - try numeric matching first (for better zero-padding handling)
+    pattern_num = _extract_number_from_filename(pattern)
+    file_num = _extract_number_from_filename(filename)
+    
+    if pattern_num is not None and file_num is not None:
+        # Both have numbers - compare numerically and check prefix
+        if pattern_num == file_num:
+            # Numbers match - check if prefixes match (if pattern has a prefix)
+            pattern_letters = re.sub(r'\d+', '', pattern_lower)
+            if pattern_letters:
+                # Pattern has letters - check if filename contains them
+                return pattern_letters in filename_lower
+            else:
+                # Just a number pattern - match if filename contains this number
+                return True
+    
+    # Fallback to substring matching for non-numeric patterns
+    return pattern_lower in filename_lower
 
 def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_dest: Path, auto: bool = False, force: bool = False):
     """
@@ -356,13 +449,14 @@ def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_de
 def prep_shoot(shoot_name: str, laptop_ingest_path: Path, work_ssd_path: Path):
     """
     Moves a shoot from the ingest area to the working SSD and creates the project structure.
+    Checks for existing files and handles partial preps gracefully.
     """
     source_shoot_dir = laptop_ingest_path / shoot_name
     if not source_shoot_dir.exists() or not source_shoot_dir.is_dir():
-        typer.echo(f"Shoot directory not found at ingest location: {source_shoot_dir}")
+        typer.echo(f"Shoot directory not found at ingest location: {source_shoot_dir}", err=True)
         raise typer.Exit(code=1)
 
-    # Create project structure on the work SSD
+    # Check if project already exists on work SSD
     project_dir = work_ssd_path / shoot_name
     source_folder = project_dir / "01_Source"
     resolve_folder = project_dir / "02_Resolve"
@@ -370,8 +464,18 @@ def prep_shoot(shoot_name: str, laptop_ingest_path: Path, work_ssd_path: Path):
     final_renders_folder = project_dir / "04_FinalRenders"
     graded_selects_folder = project_dir / "05_Graded_Selects"
 
+    project_exists = project_dir.exists()
+    
+    if project_exists:
+        typer.echo(f"\n⚠ WARNING: Project folder already exists at: {project_dir}")
+        typer.echo("   Will only move files that don't already exist in the project.")
+    else:
+        typer.echo(f"\n✓ Creating new project structure at: {project_dir}")
+
+    # Create project structure on the work SSD
     try:
-        typer.echo(f"Creating project structure at: {project_dir}")
+        if not project_exists:
+            typer.echo(f"Creating project structure...")
         source_folder.mkdir(parents=True, exist_ok=True)
         resolve_folder.mkdir(exist_ok=True)
         exports_folder.mkdir(exist_ok=True)
@@ -381,7 +485,7 @@ def prep_shoot(shoot_name: str, laptop_ingest_path: Path, work_ssd_path: Path):
         typer.echo(f"Could not create project directories on work SSD: {e}", err=True)
         raise typer.Exit(code=1)
 
-    # Move files from ingest to work SSD
+    # Find files to move from ingest
     video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
     files_to_move = [p for p in source_shoot_dir.iterdir() if p.is_file() and p.suffix.lower() in video_extensions]
 
@@ -389,16 +493,305 @@ def prep_shoot(shoot_name: str, laptop_ingest_path: Path, work_ssd_path: Path):
         typer.echo("No video files found in the source shoot directory to move.")
         return
 
-    typer.echo(f"Moving {len(files_to_move)} video files to {source_folder}...")
-    with typer.progressbar(files_to_move, label="Prepping") as progress:
+    # Pre-check: count files that already exist
+    existing_files = []
+    if source_folder.exists():
+        existing_files = [f.name for f in source_folder.iterdir() if f.is_file()]
+    
+    files_already_exist = 0
+    files_to_process = []
+    
+    for f in files_to_move:
+        if f.name in existing_files:
+            # Check if it's actually the same file (by size)
+            existing_path = source_folder / f.name
+            if existing_path.exists():
+                try:
+                    if f.stat().st_size == existing_path.stat().st_size:
+                        files_already_exist += 1
+                        continue
+                except Exception:
+                    pass
+        files_to_process.append(f)
+
+    total_files = len(files_to_move)
+    
+    # Summary
+    typer.echo(f"\n{'='*70}")
+    typer.echo(f"PREP SUMMARY")
+    typer.echo(f"{'='*70}")
+    typer.echo(f"Shoot: {shoot_name}")
+    typer.echo(f"Source: {source_shoot_dir}")
+    typer.echo(f"Destination: {project_dir}")
+    typer.echo(f"Total files in ingest: {total_files}")
+    typer.echo(f"Files already in project: {files_already_exist}")
+    typer.echo(f"Files to move: {len(files_to_process)}")
+    typer.echo(f"{'='*70}\n")
+
+    if files_already_exist > 0:
+        typer.echo(f"⚠ {files_already_exist}/{total_files} files already exist in project. Skipping duplicates.")
+
+    if not files_to_process:
+        typer.echo("All files already exist in project. Nothing to move.")
+        typer.echo("\nPrep complete. Project is ready for editing.")
+        return
+
+    # Move files from ingest to work SSD
+    typer.echo(f"Moving {len(files_to_process)} video files to {source_folder}...")
+    moved_count = 0
+    error_count = 0
+    
+    with typer.progressbar(files_to_process, label="Prepping") as progress:
         for f in progress:
             try:
+                dest_path = source_folder / f.name
+                if dest_path.exists():
+                    typer.echo(f"\n⚠ SKIPPING (already exists): {f.name}")
+                    continue
+                
                 shutil.move(str(f), str(source_folder))
+                moved_count += 1
             except Exception as e:
                 typer.echo(f"\n[ERROR] Could not move {f.name}: {e}", err=True)
-                # Decide on error handling. For now, we continue.
+                error_count += 1
     
-    typer.echo("\nPrep complete. Project is ready for editing.")
+    # Final summary
+    typer.echo(f"\n{'='*70}")
+    typer.echo(f"PREP COMPLETE")
+    typer.echo(f"{'='*70}")
+    typer.echo(f"Files moved: {moved_count}")
+    typer.echo(f"Files skipped (already exist): {files_already_exist}")
+    if error_count > 0:
+        typer.echo(f"Errors: {error_count}", err=True)
+    typer.echo(f"{'='*70}\n")
+    typer.echo("Project is ready for editing.")
+
+def pull_shoot(shoot_name: str, work_ssd_path: Path, archive_path: Path, source_type: str = "raw", files_filter: Optional[list[str]] = None):
+    """
+    Pulls files from archive to the work SSD for editing.
+    Creates project structure and copies (doesn't move) files from archive.
+    
+    Args:
+        shoot_name: Name of the shoot to pull
+        work_ssd_path: Path to work SSD
+        archive_path: Path to archive HDD
+        source_type: What to pull - "raw", "selects", or "both"
+        files_filter: Optional list of filenames or patterns to filter which files to pull
+    """
+    # Determine which sources to pull from
+    pull_raw = source_type in ("raw", "both")
+    pull_selects = source_type in ("selects", "both")
+    
+    if not pull_raw and not pull_selects:
+        typer.echo(f"Invalid source type: {source_type}. Must be 'raw', 'selects', or 'both'.", err=True)
+        raise typer.Exit(code=1)
+
+    # Check if project already exists on work SSD
+    project_dir = work_ssd_path / shoot_name
+    source_folder = project_dir / "01_Source"
+    resolve_folder = project_dir / "02_Resolve"
+    exports_folder = project_dir / "03_Exports"
+    final_renders_folder = project_dir / "04_FinalRenders"
+    graded_selects_folder = project_dir / "05_Graded_Selects"
+
+    project_exists = project_dir.exists()
+    
+    if project_exists:
+        typer.echo(f"\n✓ Project folder already exists at: {project_dir}")
+        typer.echo("   Will only copy files that don't already exist in the project.")
+    else:
+        typer.echo(f"\n✓ Creating new project structure at: {project_dir}")
+
+    # Create project structure on the work SSD
+    try:
+        if not project_exists:
+            typer.echo(f"Creating project structure...")
+        source_folder.mkdir(parents=True, exist_ok=True)
+        resolve_folder.mkdir(exist_ok=True)
+        exports_folder.mkdir(exist_ok=True)
+        final_renders_folder.mkdir(exist_ok=True)
+        graded_selects_folder.mkdir(exist_ok=True)
+    except Exception as e:
+        typer.echo(f"Could not create project directories on work SSD: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    total_copied = 0
+    total_skipped = 0
+    total_errors = 0
+    
+    # Track what we're pulling
+    sources_to_pull = []
+    if pull_raw:
+        archive_raw_dir = archive_path / "Video" / "RAW" / shoot_name
+        if archive_raw_dir.exists() and archive_raw_dir.is_dir():
+            sources_to_pull.append(("RAW", archive_raw_dir, source_folder))
+        else:
+            typer.echo(f"⚠ Warning: RAW directory not found: {archive_raw_dir}", err=True)
+    
+    if pull_selects:
+        archive_selects_dir = archive_path / "Video" / "Graded_Selects" / shoot_name
+        if archive_selects_dir.exists() and archive_selects_dir.is_dir():
+            sources_to_pull.append(("Graded Selects", archive_selects_dir, graded_selects_folder))
+        else:
+            typer.echo(f"⚠ Warning: Graded Selects directory not found: {archive_selects_dir}", err=True)
+    
+    if not sources_to_pull:
+        typer.echo(f"No source directories found in archive for shoot '{shoot_name}'.", err=True)
+        raise typer.Exit(code=1)
+    
+    # Process each source
+    for source_label, archive_dir, dest_folder in sources_to_pull:
+        typer.echo(f"\n{'='*70}")
+        typer.echo(f"PULLING FROM {source_label.upper()}")
+        typer.echo(f"{'='*70}")
+        
+        # Find files to copy from this archive location
+        all_files = [p for p in archive_dir.iterdir() if p.is_file() and p.suffix.lower() in video_extensions]
+        
+        if not all_files:
+            typer.echo(f"No video files found in {source_label} directory: {archive_dir}")
+            continue
+        
+        # Apply filter if provided
+        if files_filter:
+            files_to_copy = []
+            for pattern in files_filter:
+                # Use smart matching that handles ranges and zero-padding
+                matching = [f for f in all_files if _matches_pattern(pattern, f.name)]
+                files_to_copy.extend(matching)
+            # Remove duplicates while preserving order
+            files_to_copy = list(dict.fromkeys(files_to_copy))
+        else:
+            files_to_copy = all_files
+
+        if not files_to_copy:
+            if files_filter:
+                typer.echo(f"⚠ No files found matching filter in {source_label}: {', '.join(files_filter)}")
+                typer.echo(f"   Searched {len(all_files)} file(s) in: {archive_dir}")
+                if len(all_files) <= 10:
+                    typer.echo(f"   Available files: {', '.join([f.name for f in all_files[:10]])}")
+                else:
+                    typer.echo(f"   Sample files: {', '.join([f.name for f in all_files[:5]])}...")
+            else:
+                typer.echo(f"No video files found in {source_label} directory.")
+            continue
+
+        # Pre-check: count files that already exist
+        existing_files = []
+        if dest_folder.exists():
+            existing_files = [f.name for f in dest_folder.iterdir() if f.is_file()]
+        
+        files_already_exist = 0
+        files_to_process = []
+        
+        for f in files_to_copy:
+            if f.name in existing_files:
+                # Check if it's actually the same file (by size)
+                existing_path = dest_folder / f.name
+                if existing_path.exists():
+                    try:
+                        if f.stat().st_size == existing_path.stat().st_size:
+                            files_already_exist += 1
+                            continue
+                    except Exception:
+                        pass
+            files_to_process.append(f)
+
+        total_files = len(files_to_copy)
+        
+        # Summary for this source
+        typer.echo(f"Archive source: {archive_dir}")
+        typer.echo(f"Destination: {dest_folder}")
+        typer.echo(f"Total files available: {total_files}")
+        typer.echo(f"Files already exist: {files_already_exist}")
+        typer.echo(f"Files to copy: {len(files_to_process)}")
+        if files_filter:
+            typer.echo(f"Filter applied: {', '.join(files_filter)}")
+        
+        if files_already_exist > 0:
+            typer.echo(f"⚠ {files_already_exist}/{total_files} files already exist. Skipping duplicates.")
+
+        if not files_to_process:
+            typer.echo(f"All files already exist in {dest_folder}. Skipping.")
+            continue
+
+        # Copy files from archive to work SSD (copy, don't move)
+        typer.echo(f"\nCopying {len(files_to_process)} files from {source_label}...")
+        copied_count = 0
+        error_count = 0
+        
+        with typer.progressbar(files_to_process, label=f"Pulling {source_label}") as progress:
+            for f in progress:
+                try:
+                    dest_path = dest_folder / f.name
+                    if dest_path.exists():
+                        typer.echo(f"\n⚠ SKIPPING (already exists): {f.name}")
+                        total_skipped += 1
+                        continue
+                    
+                    copy_and_verify(f, dest_folder)
+                    copied_count += 1
+                    total_copied += 1
+                except Exception as e:
+                    typer.echo(f"\n[ERROR] Could not copy {f.name}: {e}", err=True)
+                    error_count += 1
+                    total_errors += 1
+        
+        typer.echo(f"✓ {source_label}: {copied_count} copied, {files_already_exist} skipped")
+        total_skipped += files_already_exist
+    
+    # Final summary
+    typer.echo(f"\n{'='*70}")
+    typer.echo(f"PULL COMPLETE")
+    typer.echo(f"{'='*70}")
+    typer.echo(f"Total files copied: {total_copied}")
+    typer.echo(f"Total files skipped: {total_skipped}")
+    if total_errors > 0:
+        typer.echo(f"Errors: {total_errors}", err=True)
+    typer.echo(f"{'='*70}\n")
+    typer.echo("Project is ready for editing.")
+
+def _copy_metadata_from_file(source_file: Path, target_file: Path) -> bool:
+    """
+    Copy metadata from a source file to a target file using ffmpeg.
+    Preserves video/audio streams from target, adds metadata from source.
+    Returns True if successful, False otherwise.
+    """
+    if not source_file.exists() or not target_file.exists():
+        return False
+    
+    # Temporary file to avoid read/write conflicts
+    temp_output = target_file.with_name(f"{target_file.stem}_temp_meta{target_file.suffix}")
+    
+    try:
+        ffmpeg_cmd = [
+            'ffmpeg',
+            '-i', str(target_file),      # Input 0: Target video/audio streams
+            '-i', str(source_file),      # Input 1: Source metadata
+            '-map', '0:v',               # Map video from input 0
+            '-map', '0:a',               # Map audio from input 0
+            '-map_metadata', '1',        # Map all metadata from input 1
+            '-c:v', 'copy',              # Copy video stream without re-encoding
+            '-c:a', 'copy',              # Copy audio stream without re-encoding
+            '-y',                        # Overwrite temp file if it exists
+            str(temp_output)
+        ]
+        subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
+        
+        # Replace the original target file with the new file with metadata
+        shutil.move(str(temp_output), str(target_file))
+        return True
+        
+    except FileNotFoundError:
+        typer.echo("\nError: ffmpeg not found. Please install it and ensure it's in your PATH.", err=True)
+        return False
+    except subprocess.CalledProcessError as e:
+        typer.echo(f"\nWarning: Could not copy metadata: {e.stderr}", err=True)
+        # Clean up temp file on error
+        if temp_output.exists():
+            temp_output.unlink()
+        return False
 
 def _tag_media_file(source_file: Path, tags_str: str) -> Path:
     """
@@ -623,10 +1016,11 @@ def consolidate_files(source_dir: str, output_folder_name: str, archive_path: Pa
 
 def create_select_file(shoot_name: str, file_name: str, tags_str: str, work_ssd_path: Path, archive_path: Path):
     """
-    Tags a graded select, copies it to the archive and the local SSD selects folder.
+    Tags a graded select, copies metadata from source, and copies it to the archive and the local SSD selects folder.
     """
     # Define paths
     export_file_path = work_ssd_path / shoot_name / "03_Exports" / file_name
+    source_folder = work_ssd_path / shoot_name / "01_Source"
     archive_selects_dir = archive_path / "Video" / "Graded_Selects" / shoot_name
     ssd_selects_dir = work_ssd_path / shoot_name / "05_Graded_Selects"
     
@@ -643,24 +1037,77 @@ def create_select_file(shoot_name: str, file_name: str, tags_str: str, work_ssd_
         typer.echo(f"Could not create destination directories: {e}", err=True)
         raise typer.Exit(code=1)
 
-    # 3. Metadata Tagging
+    # 3. Metadata Tagging (add new tags)
+    typer.echo("Tagging file with new metadata...")
     tagged_file_path = _tag_media_file(export_file_path, tags_str)
     
-    # 4. Copy to Archive
-    typer.echo(f"Copying tagged select to archive: {archive_selects_dir}")
-    if not copy_and_verify(tagged_file_path, archive_selects_dir):
+    # 4. Copy metadata from source file (01_Source) if available
+    source_file = None
+    if source_folder.exists():
+        # Try to find matching source file by stem (filename without extension)
+        source_files = list(source_folder.glob(f"{export_file_path.stem}.*"))
+        if source_files:
+            source_file = source_files[0]
+            typer.echo(f"Copying metadata from source file: {source_file.name}")
+            if _copy_metadata_from_file(source_file, tagged_file_path):
+                typer.echo("✓ Metadata copied successfully from source file.")
+            else:
+                typer.echo("⚠ Warning: Could not copy metadata from source file. Continuing with tags only.")
+        else:
+            typer.echo(f"⚠ No matching source file found in 01_Source for '{export_file_path.stem}'. Skipping metadata copy.")
+    else:
+        typer.echo(f"⚠ Source folder not found: {source_folder}. Skipping metadata copy.")
+    
+    # 5. Copy to Archive (with duplicate check)
+    typer.echo(f"\nCopying tagged select to archive: {archive_selects_dir}")
+    archive_dest_file = archive_selects_dir / tagged_file_path.name
+    if archive_dest_file.exists():
+        # Check if it's a duplicate by size
+        try:
+            if tagged_file_path.stat().st_size == archive_dest_file.stat().st_size:
+                typer.echo(f"⚠ File already exists in archive (same size). Skipping archive copy.")
+            else:
+                typer.echo(f"⚠ File exists in archive but with different size. Copying anyway.")
+                if not copy_and_verify(tagged_file_path, archive_selects_dir):
+                    typer.echo("Aborting due to archive copy failure.", err=True)
+                    tagged_file_path.unlink() # Clean up temp file
+                    raise typer.Exit(code=1)
+        except Exception:
+            # If we can't check size, copy anyway
+            if not copy_and_verify(tagged_file_path, archive_selects_dir):
+                typer.echo("Aborting due to archive copy failure.", err=True)
+                tagged_file_path.unlink() # Clean up temp file
+                raise typer.Exit(code=1)
+    elif not copy_and_verify(tagged_file_path, archive_selects_dir):
         typer.echo("Aborting due to archive copy failure.", err=True)
         tagged_file_path.unlink() # Clean up temp file
         raise typer.Exit(code=1)
+    else:
+        typer.echo("✓ File copied to archive.")
         
-    # 5. Copy to SSD Selects folder
+    # 6. Copy to SSD Selects folder (with duplicate check)
     typer.echo(f"Copying tagged select to SSD: {ssd_selects_dir}")
-    if not copy_and_verify(tagged_file_path, ssd_selects_dir):
+    ssd_dest_file = ssd_selects_dir / tagged_file_path.name
+    if ssd_dest_file.exists():
+        # Check if it's a duplicate by size
+        try:
+            if tagged_file_path.stat().st_size == ssd_dest_file.stat().st_size:
+                typer.echo(f"⚠ File already exists in SSD selects folder (same size). Skipping SSD copy.")
+            else:
+                typer.echo(f"⚠ File exists in SSD selects but with different size. Copying anyway.")
+                if not copy_and_verify(tagged_file_path, ssd_selects_dir):
+                    typer.echo("Warning: Could not copy select to SSD. It is safely in the archive.", err=True)
+        except Exception:
+            # If we can't check size, copy anyway if not exists
+            if not copy_and_verify(tagged_file_path, ssd_selects_dir):
+                typer.echo("Warning: Could not copy select to SSD. It is safely in the archive.", err=True)
+    elif not copy_and_verify(tagged_file_path, ssd_selects_dir):
         # This is not a critical failure, the file is archived. Warn the user.
         typer.echo("Warning: Could not copy select to SSD. It is safely in the archive.", err=True)
+    else:
+        typer.echo("✓ File copied to SSD selects folder.")
     
-    # 6. Cleanup
+    # 7. Cleanup
     tagged_file_path.unlink()
     
-    typer.echo("\nCreate select complete.")
->>>>>>> 26e5260 (feat: Add create-select command for reusable clips)
+    typer.echo("\n✓ Create select complete.")

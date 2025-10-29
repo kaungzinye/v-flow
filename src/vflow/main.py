@@ -53,6 +53,41 @@ def prep(
     actions.prep_shoot(shoot, laptop_dest, work_ssd_dest)
 
 @app.command()
+def pull(
+    shoot: str = typer.Option(..., "--shoot", "-n", help="Name of the shoot to pull from archive"),
+    source: str = typer.Option("raw", "--source", "-s", help="What to pull: 'raw' (default), 'selects', or 'both'. Raw files go to 01_Source, graded selects go to 05_Graded_Selects."),
+    files: list[str] = typer.Option(None, "--files", "-f", help="Optional: Specific filenames, patterns, or ranges to pull (e.g., 'C3317' or 'C3317-C3351'). Can specify multiple times. If omitted, pulls all files."),
+):
+    """
+    Pulls files from archive to the work SSD for editing.
+    
+    Useful when you want to work with archived footage. Creates the standard
+    project structure and copies (doesn't move) files from archive to your work SSD.
+    
+    Source options:
+    - 'raw': Pull raw files from Video/RAW/ to 01_Source/ (default)
+    - 'selects': Pull graded selects from Video/Graded_Selects/ to 05_Graded_Selects/
+    - 'both': Pull both raw files and graded selects to their respective folders
+    
+    You can optionally specify specific files or partial filenames to pull only
+    selected clips.
+    """
+    if source not in ("raw", "selects", "both"):
+        typer.echo(f"Invalid source type: {source}. Must be 'raw', 'selects', or 'both'.", err=True)
+        raise typer.Exit(code=1)
+    
+    typer.echo(f"Pulling '{shoot}' from archive to work SSD (source: {source})...")
+    
+    # Load configuration
+    app_config = config.load_config()
+    
+    # Get locations
+    work_ssd_dest = config.get_location(app_config, "work_ssd")
+    archive_dest = config.get_location(app_config, "archive_hdd")
+    
+    actions.pull_shoot(shoot, work_ssd_dest, archive_dest, source_type=source, files_filter=files)
+
+@app.command()
 def archive(
     shoot: str = typer.Option(..., "--shoot", "-n", help="Name of the shoot"),
     file: str = typer.Option(..., "--file", "-f", help="Filename of the exported video to archive"),
