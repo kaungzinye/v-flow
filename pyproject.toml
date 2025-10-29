@@ -1,0 +1,14 @@
+[project]
+name = "v-flow"
+version = "0.1.0"
+description = "A CLI tool to automate media backup and processing workflows for videographers."
+authors = [{ name = "Kaung", email = "kaungzinye@gmail.com" }]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "typer[all]",
+    "pyyaml",
+]
+
+[project.scripts]
+v-flow = "vflow.main:app"

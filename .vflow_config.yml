@@ -1,0 +1,12 @@
+# v-flow configuration file
+# Please ensure these paths are correct and the drives are mounted.
+
+locations:
+  # Ingest location on your primary computer
+  laptop: "/Users/kaungzinye/Desktop/Ingest"
+
+  # Working directory for active projects on your fast SSD
+  work_ssd: "/Volumes/T7/ActiveProjects"
+
+  # Long-term storage for all media
+  archive_hdd: "/Volumes/Kaung's Hard Drive"
