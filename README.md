@@ -4,6 +4,8 @@ A CLI tool to automate media backup and processing workflows for videographers.
 
 ---
 
+Last updated: 2025-10-29
+
 ## The v-flow Workflow
 
 v-flow is designed around a professional media workflow that separates your storage into a long-term **Archive** (on a large HDD) and a temporary **Workspace** (on a fast SSD). This keeps your SSD clean and your media library organized.
@@ -31,12 +33,27 @@ You MUST edit the file to point to your actual storage locations (laptop, work S
 ## Commands
 
 ### `v-flow ingest`
-*   **Purpose:** Safely copies footage from an SD card to two separate locations (laptop and archive) for immediate backup.
+*   **Purpose:** Safely copies footage from an SD card to two separate locations (laptop and archive) for immediate backup. Now supports automatic shoot naming by file date range and safety checks for duplicates.
 *   **Prerequisites:** A configured `~/.vflow_config.yml` file.
+*   **Options:**
+    - `--source, -s` (required): Exact folder where videos exist (e.g., `.../M4ROOT/CLIP`).
+    - `--shoot, -n` (optional if `--auto`): The shoot folder name, e.g., `2025-10-12_ShootName` or `2025-10-12_to_2025-10-15_ShootName`.
+    - `--auto, -a`: Infer shoot name from the date range of media files. If multiple days are detected, a range is used.
+    - `--force, -f`: Bypass date-range validation warnings when the provided `--shoot` name does not match detected file dates.
 *   **Usage:**
-    ```bash
-    v-flow ingest --source <path-to-sd-card> --shoot <YYYY-MM-DD_ShootName>
-    ```
+    - Manual naming:
+      ```bash
+      v-flow ingest --source "/Volumes/SDCARD/private/M4ROOT/CLIP" --shoot 2025-10-12_Stockholm_Broll
+      ```
+    - Automatic naming by file dates:
+      ```bash
+      v-flow ingest --source "/Volumes/SDCARD/private/M4ROOT/CLIP" --auto
+      ```
+*   **Behavior:**
+    - Recursively finds common video formats (.mp4, .mov, .mxf, .mts, .avi, .m4v).
+    - Derives date range from file creation/modification dates.
+    - Detects existing shoots in laptop ingest and archive locations; copies only missing files.
+    - Creates target shoot folders if needed.
 
 ### `v-flow prep`
 *   **Purpose:** Prepares a shoot for editing by moving it to your fast work SSD. It creates a standard project structure: `01_Source`, `02_Resolve`, `03_Exports`, `04_FinalRenders`, and `05_Graded_Selects`.

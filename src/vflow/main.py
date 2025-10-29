@@ -9,13 +9,21 @@ from . import actions
 
 @app.command()
 def ingest(
-    source: str = typer.Option(..., "--source", "-s", help="Source directory (e.g., SD card)"),
-    shoot: str = typer.Option(..., "--shoot", "-n", help="Name of the shoot (e.g., '2025-09-15_Stockholm_Broll')"),
+    source: str = typer.Option(..., "--source", "-s", help="Exact folder path where videos are located (e.g., '/Volumes/Kaung 128GB/private/M4ROOT/CLIP')"),
+    shoot: str = typer.Option(None, "--shoot", "-n", help="Name of the shoot (e.g., '2025-09-15_Stockholm_Broll'). Optional if --auto is used."),
+    auto: bool = typer.Option(False, "--auto", "-a", help="Automatically infer shoot folder name from file dates. Creates date range if spanning multiple days."),
+    force: bool = typer.Option(False, "--force", "-f", help="Force ingest even if shoot name conflicts with existing date ranges."),
 ):
     """
     Ingests footage from a source to the laptop and archive.
+    
+    The source should be the exact folder path where your video files are located
+    (e.g., '/Volumes/Kaung 128GB/private/M4ROOT/CLIP' for Sony cameras).
+    Videos will be searched recursively from this folder.
     """
-    typer.echo(f"Starting ingest for shoot '{shoot}'...")
+    if not auto and not shoot:
+        typer.echo("Either --shoot or --auto must be provided.", err=True)
+        raise typer.Exit(code=1)
     
     # Load configuration
     app_config = config.load_config()
@@ -24,7 +32,7 @@ def ingest(
     laptop_dest = config.get_location(app_config, "laptop")
     archive_dest = config.get_location(app_config, "archive_hdd")
     
-    actions.ingest_shoot(source, shoot, laptop_dest, archive_dest)
+    actions.ingest_shoot(source, shoot, laptop_dest, archive_dest, auto=auto, force=force)
 
 @app.command()
 def prep(
