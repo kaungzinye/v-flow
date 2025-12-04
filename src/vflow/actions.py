@@ -2,7 +2,7 @@ import shutil
 import typer
 from pathlib import Path
 import subprocess
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 import re
 from . import utils_date
@@ -19,9 +19,9 @@ def copy_and_verify(source: Path, dest: Path):
         return False
     return True
 
-def _get_media_date(file_path: Path) -> date:
+def _get_media_date(file_path: Path) -> datetime:
     """
-    Extract the date from a media file.
+    Extract the date/time from a media file.
     Uses filesystem creation date (birthtime) if available, else modification time.
     """
     try:
@@ -29,12 +29,12 @@ def _get_media_date(file_path: Path) -> date:
         stat = file_path.stat()
         creation_time = getattr(stat, 'st_birthtime', None)
         if creation_time:
-            return date.fromtimestamp(creation_time)
+            return datetime.fromtimestamp(creation_time)
         # Fallback to modification time
-        return date.fromtimestamp(stat.st_mtime)
+        return datetime.fromtimestamp(stat.st_mtime)
     except Exception:
-        # Last resort: use current date
-        return date.today()
+        # Last resort: use current date/time
+        return datetime.now()
 
 def _find_existing_shoots(laptop_dest: Path, archive_dest: Path) -> dict:
     """
@@ -198,9 +198,10 @@ def _matches_pattern(pattern: str, filename: str) -> bool:
     # Fallback to substring matching for non-numeric patterns
     return pattern_lower in filename_lower
 
-def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_dest: Path, auto: bool = False, force: bool = False):
+def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_dest: Path, auto: bool = False, force: bool = False, skip_laptop: bool = False, workspace_dest: Optional[Path] = None, split_threshold: int = 0):
     """
     The core logic for the ingest command with date-aware duplicate detection.
+    Supports splitting by time gap, skipping laptop backup, and ingesting to workspace.
     """
     source_path = Path(source_dir)
     if not source_path.exists() or not source_path.is_dir():
@@ -220,230 +221,237 @@ def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_de
 
     typer.echo(f"\nFound {len(files_to_ingest)} video file(s) to ingest.")
 
-    # 2. Extract dates from files
-    file_dates = [_get_media_date(f) for f in files_to_ingest]
-    min_date = min(file_dates)
-    max_date = max(file_dates)
+    # 2. Extract dates and prepare clusters
+    files_with_dates = [(f, _get_media_date(f)) for f in files_to_ingest]
     
-    typer.echo(f"Date range of files: {min_date} to {max_date}")
-
-    # 3. Discover existing shoots and determine target shoot folder
-    existing_shoots = _find_existing_shoots(laptop_dest, archive_dest)
-    
-    target_shoot_name = None
-    
-    if auto:
-        # Auto mode: find matching shoot or create new one
-        file_date_range = (min_date, max_date)
-        matching_shoot = _find_matching_shoot(file_date_range, existing_shoots)
-        
-        if matching_shoot:
-            target_shoot_name = matching_shoot
-            typer.echo(f"\n✓ Using existing shoot: {target_shoot_name}")
-        else:
-            # Create new shoot name from date range
-            target_shoot_name = utils_date.format_shoot_name(min_date, max_date, "Ingest")
-            typer.echo(f"\n✓ Creating new shoot: {target_shoot_name}")
-            if existing_shoots:
-                typer.echo("\nOther shoots with similar dates:")
-                for shoot, shoot_info in existing_shoots.items():
-                    start, end = shoot_info['date_range']
-                    if utils_date.date_in_range(min_date, start, end) or utils_date.date_in_range(max_date, start, end):
-                        typer.echo(f"  - {shoot} ({start} to {end})")
+    clusters = []
+    if split_threshold > 0:
+        clusters = utils_date.cluster_files_by_date(files_with_dates, split_threshold)
+        if len(clusters) > 1:
+            typer.echo(f"✓ Splitting footage into {len(clusters)} shoots (gap > {split_threshold}h).")
     else:
-        # Manual mode: use provided shoot name
-        if not shoot_name:
-            typer.echo("Shoot name is required when --auto is not used.", err=True)
-            raise typer.Exit(code=1)
+        clusters = [[f for f, d in files_with_dates]]
+
+    # Process each cluster as a separate shoot
+    for i, cluster_files in enumerate(clusters):
+        if len(clusters) > 1:
+            typer.echo(f"\n{'='*30} PART {i+1}/{len(clusters)} {'='*30}")
+
+        # Calculate dates for this cluster
+        cluster_dates = [_get_media_date(f) for f in cluster_files]
+        min_dt = min(cluster_dates)
+        max_dt = max(cluster_dates)
+        min_date = min_dt.date()
+        max_date = max_dt.date()
         
-        target_shoot_name = shoot_name
+        typer.echo(f"Date range: {min_date} to {max_date}")
+        typer.echo(f"Files in this shoot: {len(cluster_files)}")
+
+        # 3. Discover existing shoots and determine target shoot folder
+        existing_shoots = _find_existing_shoots(laptop_dest, archive_dest)
         
-        # Validate date range matches existing shoot if it exists
-        if target_shoot_name in existing_shoots:
-            shoot_info = existing_shoots[target_shoot_name]
-            shoot_start, shoot_end = shoot_info['date_range']
-            if not (shoot_start <= min_date and max_date <= shoot_end):
-                typer.echo(f"\n⚠ WARNING: Shoot '{target_shoot_name}' exists with date range {shoot_start} to {shoot_end}", err=True)
-                typer.echo(f"   But files have date range {min_date} to {max_date}", err=True)
-                if not force:
-                    typer.echo("   Use --force to proceed anyway.", err=True)
-                    raise typer.Exit(code=1)
-        else:
-            # Check if shoot name date prefix matches file dates
-            shoot_date_range = utils_date.parse_shoot_date_range(target_shoot_name)
-            if shoot_date_range:
-                shoot_start, shoot_end = shoot_date_range
-                if not (shoot_start <= min_date and max_date <= shoot_end):
-                    typer.echo(f"\n⚠ WARNING: Shoot name date prefix ({shoot_start} to {shoot_end}) doesn't match file dates ({min_date} to {max_date})", err=True)
-                    if not force:
-                        typer.echo("   Use --force to proceed anyway.", err=True)
-                        raise typer.Exit(code=1)
+        target_shoot_name = None
+        
+        if auto:
+            # Auto mode: find matching shoot or create new one
+            # Use base name from dates
+            base_name = utils_date.format_shoot_name(min_date, max_date, "Ingest")
+            
+            # If splitting, ensure unique names if dates overlap or just for clarity
+            if len(clusters) > 1:
+                # Check if base_name already implies uniqueness (different dates)
+                # If multiple clusters have same date range (e.g. same day), we MUST append suffix
+                # To be safe and consistent, if splitting is active, we can append suffix
+                # Or we can check if base_name is already taken by another cluster?
+                # Simplest: Append _PartX if splitting
+                target_shoot_name = f"{base_name}_Part{i+1}"
             else:
-                typer.echo(f"\n⚠ WARNING: Shoot name '{target_shoot_name}' doesn't follow date format.", err=True)
-                if not force:
-                    typer.echo("   Use --force to proceed anyway.", err=True)
+                # Normal auto behavior
+                file_date_range = (min_date, max_date)
+                matching_shoot = _find_matching_shoot(file_date_range, existing_shoots)
+                
+                if matching_shoot:
+                    target_shoot_name = matching_shoot
+                    typer.echo(f"\n✓ Using existing shoot: {target_shoot_name}")
+                else:
+                    target_shoot_name = base_name
+                    typer.echo(f"\n✓ Creating new shoot: {target_shoot_name}")
+        else:
+            # Manual mode
+            if not shoot_name:
+                typer.echo("Shoot name is required when --auto is not used.", err=True)
+                raise typer.Exit(code=1)
+            
+            if len(clusters) > 1:
+                target_shoot_name = f"{shoot_name}_Part{i+1}"
+            else:
+                target_shoot_name = shoot_name
+            
+            # Validate date range (skip if splitting, as manual name + part is new)
+            # Only validate if we are NOT splitting or if it's the only cluster
+            if len(clusters) == 1:
+                if target_shoot_name in existing_shoots:
+                    shoot_info = existing_shoots[target_shoot_name]
+                    shoot_start, shoot_end = shoot_info['date_range']
+                    if not (shoot_start <= min_date and max_date <= shoot_end):
+                        typer.echo(f"\n⚠ WARNING: Shoot '{target_shoot_name}' exists with date range {shoot_start} to {shoot_end}", err=True)
+                        typer.echo(f"   But files have date range {min_date} to {max_date}", err=True)
+                        if not force:
+                            typer.echo("   Use --force to proceed anyway.", err=True)
+                            raise typer.Exit(code=1)
+
+        # Check where target shoot exists
+        shoot_exists_info = existing_shoots.get(target_shoot_name, {
+            'in_laptop': False,
+            'in_archive': False
+        })
+        
+        shoot_in_laptop = shoot_exists_info.get('in_laptop', False)
+        shoot_in_archive = shoot_exists_info.get('in_archive', False)
+        
+        # Prepare destinations
+        laptop_shoot_dir = laptop_dest / target_shoot_name
+        archive_shoot_dir = archive_dest / "Video" / "RAW" / target_shoot_name
+        workspace_shoot_dir = None
+        if workspace_dest:
+            workspace_shoot_dir = workspace_dest / target_shoot_name / "01_Source"
+
+        # Determine copy strategy
+        copy_to_laptop = not skip_laptop
+        copy_to_archive = True
+        copy_to_workspace = workspace_dest is not None
+
+        if skip_laptop:
+            typer.echo("   Skipping laptop ingest as requested.")
+            
+        if shoot_in_archive and not shoot_in_laptop and copy_to_laptop:
+            typer.echo(f"\n✓ Shoot '{target_shoot_name}' exists in archive but not in ingest.", err=True)
+            typer.echo("   Will ingest to laptop only (skipping archive copy since it's already archived).")
+            copy_to_archive = False
+
+        # Create directories
+        # Laptop
+        if copy_to_laptop:
+            try:
+                if not laptop_shoot_dir.exists():
+                    laptop_shoot_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                if e.errno == 28:
+                    typer.echo(f"  [WARNING] Laptop storage full. Skipping copy to laptop.", err=True)
+                    copy_to_laptop = False
+                else:
+                    typer.echo(f"Could not create laptop directory: {e}", err=True)
                     raise typer.Exit(code=1)
 
-    # Check where target shoot exists and determine copy strategy
-    shoot_exists_info = existing_shoots.get(target_shoot_name, {
-        'in_laptop': False,
-        'in_archive': False
-    })
-    
-    shoot_in_laptop = shoot_exists_info.get('in_laptop', False)
-    shoot_in_archive = shoot_exists_info.get('in_archive', False)
-    
-    # Pre-check: Count how many files already exist in both locations
-    laptop_shoot_dir = laptop_dest / target_shoot_name
-    archive_shoot_dir = archive_dest / "Video" / "RAW" / target_shoot_name
-    
-    if shoot_in_laptop or shoot_in_archive:
-        # Quick check: count files that already exist in the existing folders
-        existing_in_laptop = 0
-        existing_in_archive = 0
-        
-        if shoot_in_laptop and laptop_shoot_dir.exists():
-            existing_in_laptop = sum(1 for f in files_to_ingest if _is_duplicate(f, laptop_shoot_dir))
-        
-        if shoot_in_archive and archive_shoot_dir.exists():
-            existing_in_archive = sum(1 for f in files_to_ingest if _is_duplicate(f, archive_shoot_dir))
-        
-        total_files = len(files_to_ingest)
-        
-        # If all files already exist in both locations, skip entirely
-        if shoot_in_laptop and shoot_in_archive and existing_in_laptop == total_files and existing_in_archive == total_files:
-            typer.echo(f"\n⚠ WARNING: Shoot '{target_shoot_name}' already exists in both ingest and archive.", err=True)
-            typer.echo(f"   All {total_files} files already exist in both locations. Skipping ingest.", err=True)
-            typer.echo("\nIngest skipped.")
-            return
-        elif shoot_in_laptop and existing_in_laptop == total_files:
-            typer.echo(f"\n⚠ WARNING: Shoot '{target_shoot_name}' already exists in ingest folder.", err=True)
-            typer.echo(f"   All {total_files} files already exist in ingest. Skipping ingest.", err=True)
-            typer.echo("\nIngest skipped.")
-            return
-        
-        # Some files are missing, proceed but warn
-        if shoot_in_laptop:
-            typer.echo(f"\n⚠ WARNING: Shoot '{target_shoot_name}' already exists in ingest folder.", err=True)
-            typer.echo(f"   {existing_in_laptop}/{total_files} files already exist. Will only copy missing files.")
-        
-        if shoot_in_archive:
-            typer.echo(f"\n⚠ Shoot '{target_shoot_name}' exists in archive.", err=True)
-            typer.echo(f"   {existing_in_archive}/{total_files} files already exist in archive. Will only copy missing files.")
-    
-    # Determine copy strategy based on where shoot exists
-    copy_to_laptop = True
-    copy_to_archive = True
-    
-    if shoot_in_archive and not shoot_in_laptop:
-        typer.echo(f"\n✓ Shoot '{target_shoot_name}' exists in archive but not in ingest.", err=True)
-        typer.echo("   Will ingest to laptop only (skipping archive copy since it's already archived).")
-        copy_to_archive = False
-    elif not shoot_in_laptop and not shoot_in_archive:
-        typer.echo(f"\n✓ Shoot '{target_shoot_name}' is new. Will ingest to both laptop and archive.")
-
-    # 4. Safety check: ensure destinations are correct (already defined above, just verify)
-    # Verify paths are within expected locations
-    try:
-        laptop_shoot_dir.resolve().relative_to(laptop_dest.resolve())
-        archive_shoot_dir.resolve().relative_to((archive_dest / "Video" / "RAW").resolve())
-    except ValueError:
-        typer.echo("ERROR: Invalid destination paths detected. This should not happen.", err=True)
-        raise typer.Exit(code=1)
-
-    # 5. Preflight summary
-    typer.echo(f"\n{'='*70}")
-    typer.echo(f"INGEST SUMMARY")
-    typer.echo(f"{'='*70}")
-    typer.echo(f"Source: {source_path}")
-    typer.echo(f"Files: {len(files_to_ingest)}")
-    typer.echo(f"Date range: {min_date} to {max_date}")
-    typer.echo(f"Target shoot: {target_shoot_name}")
-    typer.echo(f"Laptop destination: {laptop_shoot_dir} {'(existing)' if shoot_in_laptop else '(new)'}")
-    typer.echo(f"Archive destination: {archive_shoot_dir} {'(existing)' if shoot_in_archive else '(new)'}")
-    typer.echo(f"{'='*70}\n")
-
-    # 6. Create destination directories (only if they don't exist)
-    try:
-        if not laptop_shoot_dir.exists():
-            laptop_shoot_dir.mkdir(parents=True, exist_ok=True)
-            typer.echo(f"Created laptop shoot directory: {laptop_shoot_dir}")
-        else:
-            typer.echo(f"Using existing laptop shoot directory: {laptop_shoot_dir}")
-        
-        if copy_to_archive and not archive_shoot_dir.exists():
-            archive_shoot_dir.mkdir(parents=True, exist_ok=True)
-            typer.echo(f"Created archive shoot directory: {archive_shoot_dir}")
-        elif copy_to_archive:
-            typer.echo(f"Using existing archive shoot directory: {archive_shoot_dir}")
-    except Exception as e:
-        typer.echo(f"Could not create destination directories: {e}", err=True)
-        raise typer.Exit(code=1)
-
-    # 7. Ingest files with duplicate detection
-    copied_count = 0
-    skipped_count = 0
-    error_count = 0
-
-    with typer.progressbar(files_to_ingest, label="Ingesting") as progress:
-        for file_path in progress:
-            # Check for duplicates (only check where we're actually copying)
-            laptop_dup = _is_duplicate(file_path, laptop_shoot_dir) if copy_to_laptop else False
-            archive_dup = _is_duplicate(file_path, archive_shoot_dir) if copy_to_archive else False
-            
-            # If both destinations would be skipped and both files exist, skip entirely
-            if laptop_dup and archive_dup and not (copy_to_laptop and copy_to_archive):
-                # This shouldn't happen often - both files exist but we're copying to one
-                pass
-            
-            if laptop_dup and archive_dup:
-                typer.echo(f"\n⚠ SKIPPING (duplicate): {file_path.name}")
-                typer.echo(f"   Already exists in both laptop and archive for shoot '{target_shoot_name}'")
-                skipped_count += 1
-                continue
-            elif laptop_dup or archive_dup:
-                typer.echo(f"\n⚠ PARTIAL DUPLICATE: {file_path.name}")
-                if laptop_dup and copy_to_laptop:
-                    typer.echo(f"   File exists in laptop, {'copying to archive' if copy_to_archive and not archive_dup else 'skipped (already complete)'}")
-                elif archive_dup and copy_to_archive:
-                    typer.echo(f"   File exists in archive, {'copying to laptop' if copy_to_laptop and not laptop_dup else 'skipped (already complete)'}")
-            
-            typer.echo(f"\nProcessing {file_path.name}...")
-            
-            file_copied = False
-            
-            # Copy to laptop if enabled and not duplicate
-            if copy_to_laptop and not laptop_dup:
-                typer.echo(f"  -> Laptop: {laptop_shoot_dir}")
-                if copy_and_verify(file_path, laptop_shoot_dir):
-                    file_copied = True
+        # Archive (Critical)
+        if copy_to_archive:
+            try:
+                if not archive_shoot_dir.exists():
+                    archive_shoot_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                typer.echo(f"Could not create archive directory: {e}", err=True)
+                raise typer.Exit(code=1)
+                
+        # Workspace
+        if copy_to_workspace:
+            try:
+                if not workspace_shoot_dir.exists():
+                    workspace_shoot_dir.mkdir(parents=True, exist_ok=True)
+                # Also create other project folders if ingesting to workspace
+                (workspace_dest / target_shoot_name / "02_Resolve").mkdir(exist_ok=True)
+                (workspace_dest / target_shoot_name / "03_Exports").mkdir(exist_ok=True)
+                (workspace_dest / target_shoot_name / "04_FinalRenders").mkdir(exist_ok=True)
+                (workspace_dest / target_shoot_name / "05_Graded_Selects").mkdir(exist_ok=True)
+            except OSError as e:
+                if e.errno == 28:
+                    typer.echo(f"  [WARNING] Workspace storage full. Skipping copy to workspace.", err=True)
+                    copy_to_workspace = False
                 else:
-                    error_count += 1
-            elif not copy_to_laptop:
-                typer.echo(f"  -> Laptop: SKIPPED (shoot already in ingest)")
-            
-            # Copy to archive if enabled and not duplicate
-            if copy_to_archive and not archive_dup:
-                typer.echo(f"  -> Archive: {archive_shoot_dir}")
-                if copy_and_verify(file_path, archive_shoot_dir):
-                    file_copied = True
-                else:
-                    error_count += 1
-            elif not copy_to_archive:
-                typer.echo(f"  -> Archive: SKIPPED (shoot already in archive)")
-            
-            # Count this file as copied if at least one copy succeeded
-            if file_copied:
-                copied_count += 1
+                    typer.echo(f"Could not create workspace directories: {e}", err=True)
+                    raise typer.Exit(code=1)
 
-    # 8. Final summary
+        # Ingest files
+        copied_count = 0
+        skipped_count = 0
+        error_count = 0
+
+        with typer.progressbar(cluster_files, label=f"Ingesting {target_shoot_name}") as progress:
+            for file_path in progress:
+                # Check duplicates
+                laptop_dup = _is_duplicate(file_path, laptop_shoot_dir) if copy_to_laptop else False
+                archive_dup = _is_duplicate(file_path, archive_shoot_dir) if copy_to_archive else False
+                workspace_dup = _is_duplicate(file_path, workspace_shoot_dir) if copy_to_workspace else False
+                
+                # Skip if all targets are duplicates
+                all_dups = True
+                if copy_to_laptop and not laptop_dup: all_dups = False
+                if copy_to_archive and not archive_dup: all_dups = False
+                if copy_to_workspace and not workspace_dup: all_dups = False
+                
+                if all_dups:
+                    skipped_count += 1
+                    continue
+
+                file_copied = False
+                
+                # Copy to Laptop
+                if copy_to_laptop and not laptop_dup:
+                    try:
+                        typer.echo(f"  -> Laptop: {laptop_shoot_dir}")
+                        if copy_and_verify(file_path, laptop_shoot_dir):
+                            file_copied = True
+                        else:
+                            error_count += 1
+                    except OSError as e:
+                        if e.errno == 28: # No space left on device
+                            typer.echo(f"  [WARNING] Laptop storage full. Skipping copy to laptop.", err=True)
+                            copy_to_laptop = False # Disable for subsequent files
+                        else:
+                            typer.echo(f"  [ERROR] Copy to laptop failed: {e}", err=True)
+                            error_count += 1
+                
+                # Copy to Archive (Primary Backup - Always attempt)
+                if copy_to_archive and not archive_dup:
+                    try:
+                        typer.echo(f"  -> Archive: {archive_shoot_dir}")
+                        if copy_and_verify(file_path, archive_shoot_dir):
+                            file_copied = True
+                        else:
+                            error_count += 1
+                    except OSError as e:
+                        if e.errno == 28:
+                             typer.echo(f"  [CRITICAL] Archive storage full. Cannot backup {file_path.name}!", err=True)
+                             error_count += 1
+                             # We don't disable archive copy globally because maybe some files fit? 
+                             # But usually full is full. Let's keep trying or maybe stop?
+                             # For safety, let's just log error.
+                        else:
+                             typer.echo(f"  [ERROR] Copy to archive failed: {e}", err=True)
+                             error_count += 1
+                        
+                # Copy to Workspace
+                if copy_to_workspace and not workspace_dup:
+                    try:
+                        typer.echo(f"  -> Workspace: {workspace_shoot_dir}")
+                        if copy_and_verify(file_path, workspace_shoot_dir):
+                            file_copied = True
+                        else:
+                            error_count += 1
+                    except OSError as e:
+                        if e.errno == 28: # No space left on device
+                            typer.echo(f"  [WARNING] Workspace storage full. Skipping copy to workspace.", err=True)
+                            copy_to_workspace = False # Disable for subsequent files
+                        else:
+                            typer.echo(f"  [ERROR] Copy to workspace failed: {e}", err=True)
+                            error_count += 1
+                
+                if file_copied:
+                    copied_count += 1
+
+        typer.echo(f"Finished {target_shoot_name}: {copied_count} copied, {skipped_count} skipped, {error_count} errors.")
+
     typer.echo(f"\n{'='*70}")
-    typer.echo(f"INGEST COMPLETE")
-    typer.echo(f"{'='*70}")
-    typer.echo(f"Files copied: {copied_count}")
-    typer.echo(f"Files skipped (duplicates): {skipped_count}")
-    if error_count > 0:
-        typer.echo(f"Errors: {error_count}", err=True)
+    typer.echo(f"ALL INGEST TASKS COMPLETE")
     typer.echo(f"{'='*70}\n")
 
 def prep_shoot(shoot_name: str, laptop_ingest_path: Path, work_ssd_path: Path):
@@ -1061,51 +1069,47 @@ def create_select_file(shoot_name: str, file_name: str, tags_str: str, work_ssd_
     # 5. Copy to Archive (with duplicate check)
     typer.echo(f"\nCopying tagged select to archive: {archive_selects_dir}")
     archive_dest_file = archive_selects_dir / tagged_file_path.name
+    should_copy_to_archive = True
     if archive_dest_file.exists():
         # Check if it's a duplicate by size
         try:
             if tagged_file_path.stat().st_size == archive_dest_file.stat().st_size:
                 typer.echo(f"⚠ File already exists in archive (same size). Skipping archive copy.")
+                should_copy_to_archive = False
             else:
                 typer.echo(f"⚠ File exists in archive but with different size. Copying anyway.")
-                if not copy_and_verify(tagged_file_path, archive_selects_dir):
-                    typer.echo("Aborting due to archive copy failure.", err=True)
-                    tagged_file_path.unlink() # Clean up temp file
-                    raise typer.Exit(code=1)
         except Exception:
-            # If we can't check size, copy anyway
-            if not copy_and_verify(tagged_file_path, archive_selects_dir):
-                typer.echo("Aborting due to archive copy failure.", err=True)
-                tagged_file_path.unlink() # Clean up temp file
-                raise typer.Exit(code=1)
-    elif not copy_and_verify(tagged_file_path, archive_selects_dir):
-        typer.echo("Aborting due to archive copy failure.", err=True)
-        tagged_file_path.unlink() # Clean up temp file
-        raise typer.Exit(code=1)
-    else:
-        typer.echo("✓ File copied to archive.")
+            typer.echo(f"⚠ Could not check size of existing file in archive. Copying anyway.")
+
+    if should_copy_to_archive:
+        if not copy_and_verify(tagged_file_path, archive_selects_dir):
+            typer.echo("Aborting due to archive copy failure.", err=True)
+            tagged_file_path.unlink() # Clean up temp file
+            raise typer.Exit(code=1)
+        else:
+            typer.echo("✓ File copied to archive.")
         
     # 6. Copy to SSD Selects folder (with duplicate check)
     typer.echo(f"Copying tagged select to SSD: {ssd_selects_dir}")
     ssd_dest_file = ssd_selects_dir / tagged_file_path.name
+    should_copy_to_ssd = True
     if ssd_dest_file.exists():
         # Check if it's a duplicate by size
         try:
             if tagged_file_path.stat().st_size == ssd_dest_file.stat().st_size:
                 typer.echo(f"⚠ File already exists in SSD selects folder (same size). Skipping SSD copy.")
+                should_copy_to_ssd = False
             else:
                 typer.echo(f"⚠ File exists in SSD selects but with different size. Copying anyway.")
-                if not copy_and_verify(tagged_file_path, ssd_selects_dir):
-                    typer.echo("Warning: Could not copy select to SSD. It is safely in the archive.", err=True)
         except Exception:
-            # If we can't check size, copy anyway if not exists
-            if not copy_and_verify(tagged_file_path, ssd_selects_dir):
-                typer.echo("Warning: Could not copy select to SSD. It is safely in the archive.", err=True)
-    elif not copy_and_verify(tagged_file_path, ssd_selects_dir):
-        # This is not a critical failure, the file is archived. Warn the user.
-        typer.echo("Warning: Could not copy select to SSD. It is safely in the archive.", err=True)
-    else:
-        typer.echo("✓ File copied to SSD selects folder.")
+            typer.echo(f"⚠ Could not check size of existing file on SSD. Copying anyway.")
+
+    if should_copy_to_ssd:
+        if not copy_and_verify(tagged_file_path, ssd_selects_dir):
+            # This is not a critical failure, the file is archived. Warn the user.
+            typer.echo("Warning: Could not copy select to SSD. It is safely in the archive.", err=True)
+        else:
+            typer.echo("✓ File copied to SSD selects folder.")
     
     # 7. Cleanup
     tagged_file_path.unlink()

@@ -38,3 +38,7 @@ def get_location(config: dict, name: str) -> Path:
         raise typer.Exit(code=1)
         
     return path
+
+def get_setting(config: dict, key: str, default: any = None) -> any:
+    """Gets a setting from the config, returning default if not found."""
+    return config.get("settings", {}).get(key, default)

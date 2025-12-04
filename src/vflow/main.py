@@ -13,6 +13,9 @@ def ingest(
     shoot: str = typer.Option(None, "--shoot", "-n", help="Name of the shoot (e.g., '2025-09-15_Stockholm_Broll'). Optional if --auto is used."),
     auto: bool = typer.Option(False, "--auto", "-a", help="Automatically infer shoot folder name from file dates. Creates date range if spanning multiple days."),
     force: bool = typer.Option(False, "--force", "-f", help="Force ingest even if shoot name conflicts with existing date ranges."),
+    skip_laptop: bool = typer.Option(False, "--skip-laptop", help="Skip copying files to the laptop ingest folder (saves space)."),
+    workspace: bool = typer.Option(False, "--workspace", "-w", help="Also ingest directly to the Workspace SSD."),
+    split_by_gap: int = typer.Option(0, "--split-by-gap", help="Automatically split footage into multiple shoots if a time gap of X hours is detected."),
 ):
     """
     Ingests footage from a source to the laptop and archive.
@@ -32,7 +35,15 @@ def ingest(
     laptop_dest = config.get_location(app_config, "laptop")
     archive_dest = config.get_location(app_config, "archive_hdd")
     
-    actions.ingest_shoot(source, shoot, laptop_dest, archive_dest, auto=auto, force=force)
+    workspace_dest = None
+    if workspace:
+        workspace_dest = config.get_location(app_config, "work_ssd")
+        
+    # Check for default split gap if not provided via flag
+    if split_by_gap == 0:
+        split_by_gap = config.get_setting(app_config, "default_split_gap", 0)
+    
+    actions.ingest_shoot(source, shoot, laptop_dest, archive_dest, auto=auto, force=force, skip_laptop=skip_laptop, workspace_dest=workspace_dest, split_threshold=split_by_gap)
 
 @app.command()
 def prep(
