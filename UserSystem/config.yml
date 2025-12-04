@@ -1,0 +1,8 @@
+locations:
+  archive_hdd: /Users/kaungzinye/Documents/SWE/v-flow/UserSystem/Volumes/Kaung's hard
+    Drive/MediaArchive
+  laptop: /Users/kaungzinye/Documents/SWE/v-flow/UserSystem/Users/kaungzinye/Ingest
+  work_ssd: /Users/kaungzinye/Documents/SWE/v-flow/UserSystem/Volumes/T7/Videos/Project
+    Files
+settings:
+  default_split_gap: 24
