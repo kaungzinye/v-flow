@@ -16,6 +16,7 @@ def ingest(
     skip_laptop: bool = typer.Option(False, "--skip-laptop", help="Skip copying files to the laptop ingest folder (saves space)."),
     workspace: bool = typer.Option(False, "--workspace", "-w", help="Also ingest directly to the Workspace SSD."),
     split_by_gap: int = typer.Option(0, "--split-by-gap", help="Automatically split footage into multiple shoots if a time gap of X hours is detected."),
+    files: list[str] = typer.Option(None, "--files", help="Optional: Specific filenames, patterns, or ranges to ingest (e.g., 'C3317' or 'C3317-C3351'). Can specify multiple times. If omitted, ingests all files."),
 ):
     """
     Ingests footage from a source to the laptop and archive.
@@ -43,7 +44,7 @@ def ingest(
     if split_by_gap == 0:
         split_by_gap = config.get_setting(app_config, "default_split_gap", 0)
     
-    actions.ingest_shoot(source, shoot, laptop_dest, archive_dest, auto=auto, force=force, skip_laptop=skip_laptop, workspace_dest=workspace_dest, split_threshold=split_by_gap)
+    actions.ingest_shoot(source, shoot, laptop_dest, archive_dest, auto=auto, force=force, skip_laptop=skip_laptop, workspace_dest=workspace_dest, split_threshold=split_by_gap, files_filter=files)
 
 @app.command()
 def prep(
@@ -137,17 +138,31 @@ def create_select(
 @app.command()
 def consolidate(
     source: str = typer.Option(..., "--source", "-s", help="Source directory to scan for unique files"),
-    output_folder: str = typer.Option(..., "--output-folder", "-o", help="Name of the folder to create in the archive for unique media"),
+    output_folder: str = typer.Option(None, "--output-folder", "-o", help="Name of the folder to create in the archive for unique media (required if --destination not provided)"),
+    destination: str = typer.Option(None, "--destination", "-d", help="Path relative to archive root (e.g., 'Video/Graded'). If provided, uses this instead of --output-folder."),
+    files: list[str] = typer.Option(None, "--files", "-f", help="Optional: Specific filenames, patterns, or ranges to process (e.g., 'C3317' or 'project1'). Can specify multiple times. If omitted, processes all files."),
+    tags: str = typer.Option(None, "--tags", "-t", help="Optional: Comma-separated metadata tags to add to copied files"),
 ):
     """
     Finds and copies unique media from a source drive into the archive.
+    
+    Can be used for general consolidation (with --output-folder) or for backing up exports
+    to a specific location (with --destination, e.g., "Video/Graded").
+    
+    Examples:
+    - Consolidate all files: consolidate --source "/path/to/source" --output-folder "NewFolder"
+    - Backup specific projects: consolidate --source "/path/to/exports" --destination "Video/Graded" --files "project1" --files "project2"
     """
+    if not output_folder and not destination:
+        typer.echo("Either --output-folder or --destination must be provided.", err=True)
+        raise typer.Exit(code=1)
+    
     typer.echo(f"Consolidating unique files from '{source}'...")
     
     app_config = config.load_config()
     archive_hdd_dest = config.get_location(app_config, "archive_hdd")
     
-    actions.consolidate_files(source, output_folder, archive_hdd_dest)
+    actions.consolidate_files(source, output_folder, archive_hdd_dest, destination_path=destination, file_filter=files, tags=tags, preserve_structure=True)
 
 @app.command()
 def copy_meta(
@@ -159,6 +174,7 @@ def copy_meta(
     """
     typer.echo(f"Copying metadata from '{source_folder}' to '{target_folder}'...")
     actions.copy_metadata_folder(source_folder, target_folder)
+
 
 
 @app.command()

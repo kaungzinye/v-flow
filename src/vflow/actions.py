@@ -198,7 +198,7 @@ def _matches_pattern(pattern: str, filename: str) -> bool:
     # Fallback to substring matching for non-numeric patterns
     return pattern_lower in filename_lower
 
-def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_dest: Path, auto: bool = False, force: bool = False, skip_laptop: bool = False, workspace_dest: Optional[Path] = None, split_threshold: int = 0):
+def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_dest: Path, auto: bool = False, force: bool = False, skip_laptop: bool = False, workspace_dest: Optional[Path] = None, split_threshold: int = 0, files_filter: Optional[list[str]] = None):
     """
     The core logic for the ingest command with date-aware duplicate detection.
     Supports splitting by time gap, skipping laptop backup, and ingesting to workspace.
@@ -210,16 +210,38 @@ def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_de
 
     # 1. Recursively find all video files
     video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
-    files_to_ingest = []
+    all_files = []
     for file_path in source_path.rglob('*'):
         if file_path.is_file() and file_path.suffix.lower() in video_extensions:
-            files_to_ingest.append(file_path)
+            all_files.append(file_path)
 
-    if not files_to_ingest:
+    if not all_files:
         typer.echo("No video files found in the source directory.", err=True)
         return
 
-    typer.echo(f"\nFound {len(files_to_ingest)} video file(s) to ingest.")
+    # Apply filter if provided
+    if files_filter:
+        files_to_ingest = []
+        for pattern in files_filter:
+            # Use smart matching that handles ranges and zero-padding
+            matching = [f for f in all_files if _matches_pattern(pattern, f.name)]
+            files_to_ingest.extend(matching)
+        # Remove duplicates while preserving order
+        files_to_ingest = list(dict.fromkeys(files_to_ingest))
+        
+        if not files_to_ingest:
+            typer.echo(f"⚠ No files found matching filter: {', '.join(files_filter)}", err=True)
+            typer.echo(f"   Searched {len(all_files)} file(s) in: {source_path}")
+            if len(all_files) <= 10:
+                typer.echo(f"   Available files: {', '.join([f.name for f in all_files[:10]])}")
+            else:
+                typer.echo(f"   Sample files: {', '.join([f.name for f in all_files[:5]])}...")
+            raise typer.Exit(code=1)
+        
+        typer.echo(f"\nFound {len(files_to_ingest)} file(s) matching filter (out of {len(all_files)} total).")
+    else:
+        files_to_ingest = all_files
+        typer.echo(f"\nFound {len(files_to_ingest)} video file(s) to ingest.")
 
     # 2. Extract dates and prepare clusters
     files_with_dates = [(f, _get_media_date(f)) for f in files_to_ingest]
@@ -960,15 +982,32 @@ def copy_metadata_folder(source_folder: Path, target_folder: Path):
 
     typer.echo(f"\nMetadata copy complete. {success_count} files updated, {fail_count} files skipped.")
 
-def consolidate_files(source_dir: str, output_folder_name: str, archive_path: Path):
+def consolidate_files(source_dir: str, output_folder_name: Optional[str], archive_path: Path, destination_path: Optional[str] = None, file_filter: Optional[list[str]] = None, tags: Optional[str] = None, preserve_structure: bool = True):
     """
-    Finds unique files from a source directory and copies them to a new folder in the archive.
+    Finds unique files from a source directory and copies them to the archive.
+    
+    Args:
+        source_dir: Source directory to scan for files
+        output_folder_name: Name of folder to create at archive root (used if destination_path is None)
+        archive_path: Path to archive root
+        destination_path: Optional path relative to archive root (e.g., "Video/Graded"). If provided, uses this instead of output_folder_name.
+        file_filter: Optional list of file/folder names to process. If None, processes all files.
+        tags: Optional metadata tags to add to copied files
+        preserve_structure: If True, maintains relative paths from source. If False, flattens to destination.
     """
     source_path = Path(source_dir)
-    output_path = archive_path / output_folder_name
     
     if not source_path.is_dir():
         typer.echo(f"Source is not a valid directory: {source_path}", err=True)
+        raise typer.Exit(code=1)
+
+    # Determine output path
+    if destination_path:
+        output_path = archive_path / destination_path
+    elif output_folder_name:
+        output_path = archive_path / output_folder_name
+    else:
+        typer.echo("Either --output-folder or --destination must be provided.", err=True)
         raise typer.Exit(code=1)
 
     try:
@@ -989,37 +1028,125 @@ def consolidate_files(source_dir: str, output_folder_name: str, archive_path: Pa
                 except FileNotFoundError:
                     continue # Ignore broken symlinks
 
-    # --- 2. Scan source and copy unique files ---
-    typer.echo(f"Scanning source directory and copying unique files to: {output_path}")
-    source_files = list(source_path.rglob("*.*"))
+    # --- 2. Scan source and filter files ---
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    typer.echo(f"Scanning source directory...")
+    all_source_files = list(source_path.rglob("*.*"))
+    
+    # Filter to only video files
+    source_files = [f for f in all_source_files if f.is_file() and f.suffix.lower() in video_extensions]
+    
+    # Apply file_filter if provided
+    if file_filter:
+        filtered_files = []
+        for pattern in file_filter:
+            # Check if pattern matches a file or folder in the source
+            pattern_path = source_path / pattern
+            if pattern_path.exists():
+                # It's a specific file or folder - process it
+                if pattern_path.is_file() and pattern_path.suffix.lower() in video_extensions:
+                    filtered_files.append(pattern_path)
+                elif pattern_path.is_dir():
+                    # Add all video files in this folder
+                    for file_path in pattern_path.rglob('*'):
+                        if file_path.is_file() and file_path.suffix.lower() in video_extensions:
+                            filtered_files.append(file_path)
+            else:
+                # Use smart matching that handles ranges and zero-padding
+                # Check filename and relative path
+                for f in source_files:
+                    rel_path_str = str(f.relative_to(source_path))
+                    # Check if pattern matches filename or any part of the path
+                    if (_matches_pattern(pattern, f.name) or 
+                        _matches_pattern(pattern, rel_path_str) or
+                        any(_matches_pattern(pattern, part) for part in f.relative_to(source_path).parts)):
+                        filtered_files.append(f)
+        # Remove duplicates while preserving order
+        source_files = list(dict.fromkeys(filtered_files))
+        
+        if not source_files:
+            typer.echo(f"⚠ No files found matching filter: {', '.join(file_filter)}", err=True)
+            typer.echo(f"   Searched {len(all_source_files)} file(s) in: {source_path}")
+            raise typer.Exit(code=1)
+        
+        typer.echo(f"Found {len(source_files)} file(s) matching filter (out of {len([f for f in all_source_files if f.is_file()])} total).")
+    else:
+        typer.echo(f"Found {len(source_files)} video file(s) to process.")
+
+    typer.echo(f"Copying unique files to: {output_path}")
     copied_log_path = output_path / "copied_files.txt"
     skipped_log_path = output_path / "skipped_duplicates.txt"
 
     copied_count = 0
     skipped_count = 0
+    error_count = 0
 
     with copied_log_path.open("w") as copied_log, skipped_log_path.open("w") as skipped_log:
         with typer.progressbar(source_files, label="Consolidating") as progress:
             for file in progress:
-                if file.is_file():
-                    try:
-                        file_id = (file.name, file.stat().st_size)
-                        if file_id in archive_index:
-                            skipped_log.write(f"{file}\n")
-                            skipped_count += 1
-                        else:
-                            # Copy the file
-                            copy_and_verify(file, output_path)
-                            copied_log.write(f"{file}\n")
-                            # Add to index to handle duplicates within the source itself
-                            archive_index.add(file_id)
-                            copied_count += 1
-                    except FileNotFoundError:
-                        continue # Ignore broken symlinks
+                try:
+                    # Determine destination path
+                    if preserve_structure:
+                        # Maintain relative path from source
+                        rel_path = file.relative_to(source_path)
+                        dest_file = output_path / rel_path
+                        dest_dir = dest_file.parent
+                    else:
+                        # Flatten to destination root
+                        dest_file = output_path / file.name
+                        dest_dir = output_path
+                    
+                    # Ensure destination directory exists
+                    dest_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Check for duplicates
+                    file_id = (file.name, file.stat().st_size)
+                    if file_id in archive_index:
+                        skipped_log.write(f"{file}\n")
+                        skipped_count += 1
+                        continue
+                    
+                    # Check if destination file already exists (by size)
+                    if dest_file.exists():
+                        try:
+                            source_size = file.stat().st_size
+                            dest_size = dest_file.stat().st_size
+                            if source_size == dest_size:
+                                skipped_log.write(f"{file}\n")
+                                skipped_count += 1
+                                continue
+                        except Exception:
+                            pass  # If we can't check, we'll copy anyway
+                    
+                    # Copy the file
+                    if copy_and_verify(file, dest_dir):
+                        copied_log.write(f"{file}\n")
+                        # Add to index to handle duplicates within the source itself
+                        archive_index.add(file_id)
+                        copied_count += 1
+                        
+                        # Tag the file if tags are provided
+                        if tags:
+                            try:
+                                tagged_file = _tag_media_file(dest_file, tags)
+                                # Replace the original with the tagged version
+                                shutil.move(str(tagged_file), str(dest_file))
+                            except Exception as e:
+                                typer.echo(f"\n⚠ Warning: Could not tag {dest_file.name}: {e}", err=True)
+                    else:
+                        error_count += 1
+                        
+                except FileNotFoundError:
+                    continue # Ignore broken symlinks
+                except Exception as e:
+                    typer.echo(f"\n[ERROR] Could not process {file.name}: {e}", err=True)
+                    error_count += 1
 
     typer.echo("\nConsolidation complete.")
     typer.echo(f"{copied_count} unique files copied.")
     typer.echo(f"{skipped_count} duplicate files skipped.")
+    if error_count > 0:
+        typer.echo(f"Errors: {error_count}", err=True)
     typer.echo(f"See log files in {output_path} for details.")
 
 def create_select_file(shoot_name: str, file_name: str, tags_str: str, work_ssd_path: Path, archive_path: Path):
