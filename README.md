@@ -1,16 +1,68 @@
 # v-flow
 
-> A CLI tool to automate media backup and processing workflows for videographers.
+> A CLI + Claude skills bundle to automate media backup and processing workflows for videographers.
 
-**Last updated:** 2025-10-29
+**Last updated:** 2026-03-05
 
 ---
 
 ## Quick Start
 
-1. Install: `pip install v-flow` (or clone and install locally)
-2. Configure: `v-flow make-config` and edit `~/.vflow_config.yml`
-3. Get started: `v-flow ingest --help`
+### For videographers (recommended)
+
+1. Install v-flow and its Claude skills in one step:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/kaungzinye/v-flow/main/install_vflow.sh | bash
+   ```
+
+2. Configure storage paths (runs once per machine):
+
+   In a terminal, run:
+
+   ```bash
+   v-flow make-config
+   ```
+
+   Then edit `~/.vflow_config.yml` to point to your laptop ingest folder, work SSD, and archive drive.
+
+   Alternatively, in Claude Code or Cursor you can say:
+
+   > “Set up v-flow on this machine.”
+
+   and the **v-flow Setup Assistant** skill will guide you through the same wizard.
+
+3. After setup, in Claude Code or Cursor just ask:
+
+   - “Ingest my card and set up a project on my SSD.”
+   - “Back up my ingest folder and free up space.”
+   - “Show me duplicate clips from the last day.”
+
+The bundled v-flow skills will call the local `v-flow` CLI for you using that config.
+
+### For developers
+
+1. Install the CLI:
+   - `pip install vflow-cli` (or run `pip install -e .` from this repo for local development).
+2. Configure: `v-flow make-config` and edit `~/.vflow_config.yml`.
+3. Explore commands:
+   - `v-flow --help` and `v-flow ingest --help`.
+
+---
+
+## Using v-flow with Claude skills
+
+This repo includes a set of Claude-compatible Agent Skills under the `skills/` directory (for ingest, setup, backup, maintenance, and delivery/tagging).
+
+- When you run the installer from Quick Start, those skills are copied into:
+  - `~/.claude/skills` for Claude Code.
+  - `~/.cursor/skills` for Cursor.
+- In Claude / Cursor, the skills:
+  - Listen for intents like “ingest my card”, “back up my ingest folder”, “clean up duplicates”, or “archive this export”.
+  - Decide which `v-flow` commands to run (`v-flow ingest`, `v-flow backup`, `v-flow list-duplicates`, etc.).
+  - Ask you short clarification questions before doing anything destructive.
+
+If you prefer manual setup instead of the installer, you can copy the folders from `skills/` into your tool’s skills directory and follow the same natural-language prompts.
 
 ---
 
