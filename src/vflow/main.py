@@ -336,6 +336,51 @@ def verify_backup_cmd(
     typer.echo(f"Verifying backup between source '{source}' and destination '{destination}'...")
     actions.verify_backup(source, destination, allow_delete=allow_delete, archive_wide=archive_wide)
 
+
+@app.command("list-backups")
+def list_backups_cmd(
+    subpath: str = typer.Option(
+        "Video/RAW/Desktop_Ingest",
+        "--subpath",
+        "-p",
+        help="Subpath under archive root to scan for backups (e.g., 'Video/RAW/Desktop_Ingest').",
+    ),
+):
+    """
+    List backup folders under a given archive subpath with file counts and total sizes.
+
+    Useful for quickly seeing what has been consolidated, and how large each backup folder is.
+    """
+    app_config = config.load_config()
+    archive_hdd_dest = config.get_location(app_config, "archive_hdd")
+    actions.list_backups(archive_hdd_dest, subpath)
+
+
+@app.command("restore-folder")
+def restore_folder_cmd(
+    source: str = typer.Option(..., "--source", "-s", help="Source folder to restore from (e.g., an archive backup folder)."),
+    destination: str = typer.Option(
+        ..., "--destination", "-d", help="Destination folder to restore into (e.g., a workspace or temp folder)."
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Simulate the restore without copying any files. Shows what would be copied/overwritten.",
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Allow overwriting destination files that differ in size. If false, such conflicts are reported and skipped.",
+    ),
+):
+    """
+    Restore (copy) an arbitrary folder tree from one location to another.
+
+    This is the inverse of 'backup' for general folders and can be used to pull a
+    backup folder from archive back to a workspace path.
+    """
+    actions.restore_folder(source, destination, dry_run=dry_run, overwrite=overwrite)
+
 @app.command()
 def copy_meta(
     source_folder: Path = typer.Option(..., "--source-folder", "-s", help="Path to the folder with original files"),
