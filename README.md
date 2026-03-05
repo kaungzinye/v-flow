@@ -28,6 +28,10 @@
 - [Utility Commands](#utility-commands)
   - [consolidate](#v-flow-consolidate)
   - [copy-meta](#v-flow-copy-meta)
+  - [backup](#v-flow-backup)
+  - [verify-backup](#v-flow-verify-backup)
+  - [list-backups](#v-flow-list-backups)
+  - [restore-folder](#v-flow-restore-folder)
 
 ---
 
@@ -140,6 +144,7 @@ v-flow ingest --source "/Volumes/SDCARD/private/M4ROOT/CLIP" --auto --skip-lapto
 - Derives date range from file creation/modification dates
 - **Smart Splitting:** If `--split-by-gap` is set (or configured), splits footage into separate shoots based on time gaps
 - **Storage Fallback:** If a destination drive is full, it skips that drive and continues to the Archive (ensuring backup)
+- **Cross-shoot duplicate check:** Skips any file (by name + size) already present anywhere in laptop ingest or archive, not just in the current shoot folder. So if the 28th was already ingested, ingesting 28th+29th will only copy new files from the 29th.
 - Detects existing shoots in laptop ingest and archive locations; copies only missing files
 - Creates target shoot folders if needed
 
@@ -319,3 +324,156 @@ v-flow copy-meta --source-folder <path-to-originals> --target-folder <path-to-ex
 - Copies all metadata from source to target using ffmpeg
 - Preserves video/audio streams from target file
 - Uses stream copy (no re-encoding)
+
+---
+
+### `v-flow backup`
+
+Backs up media from an arbitrary source folder (for example, an ingest folder on your laptop or SSD) into your archive with duplicate checks. This is a friendly wrapper around the `consolidate` logic and is ideal for safely emptying ingest folders after you have already ingested from SD.
+
+#### Prerequisites
+- Configured `~/.vflow_config.yml` file
+
+#### Usage
+```bash
+v-flow backup --source "/Users/you/Desktop/Ingest" --destination "Video/RAW/Desktop_Ingest"
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `--source, -s` | **(required)** Source directory to back up (e.g., your ingest folder) |
+| `--destination, -d` | **(required)** Path **relative to the archive root** where files will be copied (e.g., `Video/RAW/Desktop_Ingest`) |
+| `--files, -f` | **(optional)** Specific filenames, patterns, or ranges to back up (e.g. `C3317`, `C3317-C3351`, or partial names). Can be specified multiple times |
+| `--tags, -t` | **(optional)** Comma-separated metadata tags to add to copied files |
+| `--dry-run` | Analyze what would be backed up without copying any files. Shows which files would be copied or skipped as duplicates |
+| `--delete-source` | After copying, prompt to optionally delete source files that were successfully backed up |
+
+#### Behavior
+- Builds an index of existing archive files (by name and size) so it can skip duplicates that are already in the archive, even if they live in other folders.
+- Scans the source directory and copies only unique files into `archive_hdd/<destination>`.
+- Creates log files (`copied_files.txt` and `skipped_duplicates.txt`) in the destination folder.
+- With `--delete-source`, tracks which files were actually copied and **after the copy completes** offers an interactive prompt to delete those source files.
+
+#### Example: Backup and clean an ingest folder
+
+```bash
+# 1) Dry-run to see what would be copied and what could be deleted
+v-flow backup \
+  --source "/Users/you/Desktop/Ingest" \
+  --destination "Video/RAW/Desktop_Ingest" \
+  --dry-run \
+  --delete-source
+
+# 2) Real backup with interactive delete prompt
+v-flow backup \
+  --source "/Users/you/Desktop/Ingest" \
+  --destination "Video/RAW/Desktop_Ingest" \
+  --delete-source
+```
+
+---
+
+### `v-flow verify-backup`
+
+Verifies that files in a source folder exist in a destination folder with matching sizes. Can be used directly after `backup` or after any other manual/automated copy to confirm that your backup is complete before deleting source files.
+
+#### Usage
+
+```bash
+# Simple path-for-path mirror check
+v-flow verify-backup \
+  --source "/Users/you/Desktop/Ingest" \
+  --destination "/Volumes/Archive/Video/RAW/Desktop_Ingest"
+
+# Archive-wide safety check (recommended for ingest folders)
+v-flow verify-backup \
+  --source "/Users/you/Desktop/Ingest" \
+  --destination "/Volumes/Archive" \
+  --archive-wide
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `--source, -s` | **(required)** Source directory to verify |
+| `--destination, -d` | **(required)** Destination directory to check against |
+| `--archive-wide` | Treat destination as an **archive root** and verify that each source file exists **anywhere under it** by name + size (ignores path differences) |
+| `--allow-delete` | After a successful verification, prompt to delete all files under the source folder |
+
+#### Behavior
+- Compares all files under the source folder:
+  - In **mirror mode** (default), it checks that each file exists at the same relative path under destination with the same size.
+  - In **archive-wide mode**, it checks that each file exists **somewhere under the destination tree** with the same filename and size, regardless of exact path.
+- Prints a summary (files checked, missing files, size mismatches) and lists a sample of any problems.
+- If `--allow-delete` is set and verification **passes with no missing/mismatched files**, offers an interactive prompt to delete the source files.
+
+---
+
+### `v-flow list-backups`
+
+Lists backup folders under a given subpath of your archive, including file counts, total sizes, and last modified times. Useful for quickly seeing what has been consolidated and how large each backup set is.
+
+#### Usage
+
+```bash
+v-flow list-backups --subpath "Video/RAW/Desktop_Ingest"
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `--subpath, -p` | **(optional, default: `Video/RAW/Desktop_Ingest`)** Subpath under the archive root to scan for backup folders |
+
+#### Behavior
+- Uses the configured `archive_hdd` path from `~/.vflow_config.yml`.
+- Looks under `archive_hdd/<subpath>` for immediate subfolders (each treated as a backup set).
+- For each backup folder, prints:
+  - Folder name
+  - Number of files
+  - Total size (human-readable)
+  - Last modified timestamp (based on newest file inside)
+- Sorted so that the most recently modified backups appear first.
+
+---
+
+### `v-flow restore-folder`
+
+Restores (copies) an arbitrary folder tree from one location to another. This is the inverse of `backup` for general folders and can be used to pull a backup folder from your archive back to a workspace path.
+
+#### Usage
+
+```bash
+# Dry-run to see what would be restored
+v-flow restore-folder \
+  --source "/Volumes/Archive/Video/RAW/Desktop_Ingest/2026-01-28_to_2026-01-29_Ingest" \
+  --destination "/Users/you/Workspace/Restored_2026-01-28" \
+  --dry-run
+
+# Real restore
+v-flow restore-folder \
+  --source "/Volumes/Archive/Video/RAW/Desktop_Ingest/2026-01-28_to_2026-01-29_Ingest" \
+  --destination "/Users/you/Workspace/Restored_2026-01-28"
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `--source, -s` | **(required)** Source folder to restore from (e.g., an archive backup folder) |
+| `--destination, -d` | **(required)** Destination folder to restore into (e.g., a workspace or temp folder) |
+| `--dry-run` | Simulate the restore without copying any files. Shows what would be copied or overwritten |
+| `--overwrite` | Allow overwriting destination files that differ in size. If false (default), such conflicts are reported and skipped |
+
+#### Behavior
+- Recreates the directory structure from `source` under `destination`.
+- For each file:
+  - If the destination file **does not exist**, it is copied.
+  - If the destination file exists and has the **same size**, it is skipped.
+  - If the destination file exists and has a **different size**:
+    - With `--overwrite` **off** (default), the conflict is reported and the file is left unchanged.
+    - With `--overwrite` **on**, the destination file is overwritten.
+- In `--dry-run` mode, logs which files **would** be copied or overwritten without touching disk.

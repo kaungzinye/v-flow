@@ -1,23 +1,15 @@
 import shutil
-import typer
-from pathlib import Path
 import subprocess
 from datetime import date, datetime
+from pathlib import Path
 from typing import Optional
-import re
-from . import utils_date
 
-def copy_and_verify(source: Path, dest: Path):
-    """Copies a file and verifies its existence."""
-    try:
-        shutil.copy2(source, dest)
-        if not (dest / source.name).exists():
-            typer.echo(f"  [ERROR] Verification failed for {source.name} at {dest}", err=True)
-            return False
-    except Exception as e:
-        typer.echo(f"  [ERROR] Could not copy {source.name} to {dest}: {e}", err=True)
-        return False
-    return True
+import re
+import typer
+
+from . import utils_date
+from .core.fs_ops import copy_and_verify, _build_destination_index, _is_duplicate, _format_bytes
+from .core.patterns import _extract_number_from_filename, _parse_range_pattern, _matches_pattern
 
 def _get_media_date(file_path: Path) -> datetime:
     """
@@ -92,87 +84,6 @@ def _find_matching_shoot(file_date_range: tuple, existing_shoots: dict) -> str:
             return shoot_name
     return None
 
-def _is_duplicate(file_path: Path, dest_dir: Path) -> bool:
-    """
-    Check if a file is a duplicate at the destination (by name and size).
-    """
-    dest_file = dest_dir / file_path.name
-    if not dest_file.exists():
-        return False
-
-    try:
-        source_size = file_path.stat().st_size
-        dest_size = dest_file.stat().st_size
-        return source_size == dest_size
-    except Exception:
-        return False
-
-
-def _build_destination_index(root: Path) -> set[tuple[str, int]]:
-    """
-    Build a set of (filename, size) for all video files under root.
-    Used to skip files already ingested anywhere in laptop or archive (cross-shoot).
-    """
-    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
-    index = set()
-    if not root.exists():
-        return index
-    for f in root.rglob('*'):
-        if f.is_file() and f.suffix.lower() in video_extensions:
-            try:
-                index.add((f.name, f.stat().st_size))
-            except (OSError, FileNotFoundError):
-                pass
-    return index
-
-def _extract_number_from_filename(filename: str) -> Optional[int]:
-    """
-    Extract the first numeric sequence from a filename.
-    Returns the number as an integer, or None if no number found.
-    Handles zero-padding by extracting the numeric value.
-    """
-    match = re.search(r'(\d+)', filename)
-    if match:
-        return int(match.group(1))
-    return None
-
-def _parse_range_pattern(pattern: str) -> tuple[Optional[str], Optional[int], Optional[int]]:
-    """
-    Parse a range pattern like "C3317-C3351" or "3317-3351" or "C3317-3351".
-    Returns (prefix, start_num, end_num) or (None, None, None) if not a range.
-    """
-    # Pattern to match ranges like "C3317-C3351" or "3317-3351" or "C3317-3351"
-    # The pattern can have a prefix before the first number, and optionally before the second
-    pattern_upper = pattern.upper()
-    
-    # Try pattern with prefix on both sides: "C3317-C3351"
-    range_match = re.match(r'^([A-Za-z]*?)(\d+)-([A-Za-z]*?)(\d+)$', pattern_upper)
-    if range_match:
-        prefix1 = range_match.group(1) if range_match.group(1) else None
-        prefix2 = range_match.group(3) if range_match.group(3) else None
-        
-        # Use the prefix from the first number, but require both to match (or both be None)
-        if (prefix1 is None and prefix2 is None) or (prefix1 and prefix2 and prefix1 == prefix2):
-            prefix = prefix1
-            start_num = int(range_match.group(2))
-            end_num = int(range_match.group(4))
-            
-            if start_num <= end_num:
-                return (prefix, start_num, end_num)
-    
-    # Try pattern with no prefix: "3317-3351" or with prefix only on first: "C3317-3351"
-    # This regex allows digits after the dash, and will capture prefix from first number only
-    range_match = re.match(r'^([A-Za-z]*?)(\d+)-(\d+)$', pattern_upper)
-    if range_match:
-        prefix = range_match.group(1) if range_match.group(1) else None
-        start_num = int(range_match.group(2))
-        end_num = int(range_match.group(3))
-        
-        if start_num <= end_num:
-            return (prefix, start_num, end_num)
-    
-    return (None, None, None)  # Not a range
-
 def ingest_report(source_dir: str, archive_path: Path, laptop_path: Optional[Path] = None, priority_day: Optional[int] = None, priority_month: Optional[int] = None):
     """
     Scans SD card (or source) for video files, compares against BOTH laptop ingest
@@ -185,7 +96,7 @@ def ingest_report(source_dir: str, archive_path: Path, laptop_path: Optional[Pat
         typer.echo(f"Source directory not found: {source_path}", err=True)
         raise typer.Exit(code=1)
 
-    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v', '.braw', '.r3d', '.crm'}
     all_files = []
     for file_path in source_path.rglob('*'):
         if file_path.is_file() and file_path.suffix.lower() in video_extensions:
@@ -298,7 +209,7 @@ def list_duplicates(root: Path, max_age_hours: Optional[int] = None) -> list[tup
     If max_age_hours is set, only consider files modified in the last N hours.
     """
     import time
-    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v', '.braw', '.r3d', '.crm'}
     cutoff = (time.time() - max_age_hours * 3600) if max_age_hours else None
     by_key = {}  # (name, size) -> [path, ...]
     for f in root.rglob('*'):
@@ -321,7 +232,7 @@ def remove_duplicates(root: Path, dry_run: bool = False, max_age_hours: Optional
     If max_age_hours is set, only consider files modified in the last N hours.
     """
     import time
-    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v', '.braw', '.r3d', '.crm'}
     cutoff = (time.time() - max_age_hours * 3600) if max_age_hours else None
     by_key = {}  # (name, size) -> [path, ...]
     for f in root.rglob('*'):
@@ -352,49 +263,6 @@ def remove_duplicates(root: Path, dry_run: bool = False, max_age_hours: Optional
                     typer.echo(f"  [ERROR] Could not remove {dup}: {e}", err=True)
     return removed
 
-def _matches_pattern(pattern: str, filename: str) -> bool:
-    """
-    Check if a filename matches a pattern, handling both regular patterns and ranges.
-    Uses numeric comparison to handle zero-padding.
-    """
-    filename_lower = filename.lower()
-    pattern_lower = pattern.lower()
-    
-    # First, check if pattern is a range
-    prefix, start_num, end_num = _parse_range_pattern(pattern)
-    if start_num is not None and end_num is not None:
-        # It's a range - extract number from filename and check if in range
-        file_num = _extract_number_from_filename(filename)
-        if file_num is None:
-            return False
-        
-        # If prefix specified, check that filename contains the prefix
-        if prefix:
-            if prefix.lower() not in filename_lower:
-                return False
-        
-        # Check if number is in range
-        return start_num <= file_num <= end_num
-    
-    # Not a range - try numeric matching first (for better zero-padding handling)
-    pattern_num = _extract_number_from_filename(pattern)
-    file_num = _extract_number_from_filename(filename)
-    
-    if pattern_num is not None and file_num is not None:
-        # Both have numbers - compare numerically and check prefix
-        if pattern_num == file_num:
-            # Numbers match - check if prefixes match (if pattern has a prefix)
-            pattern_letters = re.sub(r'\d+', '', pattern_lower)
-            if pattern_letters:
-                # Pattern has letters - check if filename contains them
-                return pattern_letters in filename_lower
-            else:
-                # Just a number pattern - match if filename contains this number
-                return True
-    
-    # Fallback to substring matching for non-numeric patterns
-    return pattern_lower in filename_lower
-
 def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_dest: Path, auto: bool = False, force: bool = False, skip_laptop: bool = False, workspace_dest: Optional[Path] = None, split_threshold: int = 0, files_filter: Optional[list[str]] = None):
     """
     The core logic for the ingest command with date-aware duplicate detection.
@@ -406,7 +274,7 @@ def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_de
         raise typer.Exit(code=1)
 
     # 1. Recursively find all video files
-    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v', '.braw', '.r3d', '.crm'}
     all_files = []
     for file_path in source_path.rglob('*'):
         if file_path.is_file() and file_path.suffix.lower() in video_extensions:
@@ -725,7 +593,7 @@ def prep_shoot(shoot_name: str, laptop_ingest_path: Path, work_ssd_path: Path):
         raise typer.Exit(code=1)
 
     # Find files to move from ingest
-    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v', '.braw'}
     files_to_move = [p for p in source_shoot_dir.iterdir() if p.is_file() and p.suffix.lower() in video_extensions]
 
     if not files_to_move:
@@ -854,7 +722,7 @@ def pull_shoot(shoot_name: str, work_ssd_path: Path, archive_path: Path, source_
         typer.echo(f"Could not create project directories on work SSD: {e}", err=True)
         raise typer.Exit(code=1)
 
-    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v', '.braw', '.r3d', '.crm'}
     total_copied = 0
     total_skipped = 0
     total_errors = 0
@@ -1113,7 +981,7 @@ def archive_file(shoot_name: str, file_name: str, tags_str: str, keep_log: bool,
             source_folder = work_ssd_path / shoot_name / "01_Source"
             if source_folder.exists():
                 typer.echo(f"Cleaning up source files from {source_folder}...")
-                video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+                video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v', '.braw', '.r3d', '.crm'}
                 for video_file in source_folder.iterdir():
                     if video_file.is_file() and video_file.suffix.lower() in video_extensions:
                         video_file.unlink()
@@ -1135,7 +1003,7 @@ def copy_metadata_folder(source_folder: Path, target_folder: Path):
         typer.echo(f"Source folder not found: {source_folder}", err=True)
         raise typer.Exit(code=1)
     
-    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v', '.braw', '.r3d', '.crm'}
     target_files = [f for f in target_folder.iterdir() if f.is_file() and f.suffix.lower() in video_extensions]
     
     if not target_files:
@@ -1250,7 +1118,7 @@ def consolidate_files(
                     continue # Ignore broken symlinks
 
     # --- 2. Scan source and filter files ---
-    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v', '.braw', '.r3d', '.crm'}
     typer.echo(f"Scanning source directory...")
     all_source_files = list(source_path.rglob("*.*"))
     
@@ -1588,6 +1456,163 @@ def verify_backup(
     typer.echo(f"\nSource cleanup complete. Deleted {deleted} file(s).")
     if delete_errors:
         typer.echo(f"{delete_errors} file(s) could not be deleted. See warnings above.", err=True)
+
+
+def list_backups(archive_path: Path, subpath: str) -> None:
+    """
+    List backup folders under a given subpath of the archive with file counts and sizes.
+
+    Example: subpath = "Video/RAW/Desktop_Ingest"
+    """
+    base = archive_path / subpath
+
+    if not base.exists() or not base.is_dir():
+        typer.echo(f"No backup directory found at: {base}")
+        return
+
+    typer.echo(f"Listing backups under: {base}")
+
+    backups: list[tuple[str, int, int, float]] = []  # (name, file_count, total_size, latest_mtime)
+
+    for d in base.iterdir():
+        if not d.is_dir():
+            continue
+        file_count = 0
+        total_size = 0
+        latest_mtime = 0.0
+        for f in d.rglob("*"):
+            if f.is_file():
+                try:
+                    st = f.stat()
+                    file_count += 1
+                    total_size += st.st_size
+                    if st.st_mtime > latest_mtime:
+                        latest_mtime = st.st_mtime
+                except (OSError, FileNotFoundError):
+                    continue
+        backups.append((d.name, file_count, total_size, latest_mtime))
+
+    if not backups:
+        typer.echo("No backup folders found.")
+        return
+
+    # Sort by latest_mtime descending (most recently touched first)
+    backups.sort(key=lambda x: x[3], reverse=True)
+
+    typer.echo("\nBackups:")
+    typer.echo("Name\tFiles\tSize\tLast Modified")
+    from datetime import datetime
+
+    for name, count, size, mtime in backups:
+        if mtime:
+            ts = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+        else:
+            ts = "-"
+        typer.echo(f"{name}\t{count}\t{_format_bytes(size)}\t{ts}")
+
+
+def restore_folder(source_dir: str, dest_dir: str, dry_run: bool = False, overwrite: bool = False) -> None:
+    """
+    Restore (copy) a folder tree from source_dir to dest_dir.
+
+    This is the inverse of backup for arbitrary folders: it recreates the directory structure
+    and copies files that are missing or (optionally) different in size.
+    """
+    source_path = Path(source_dir)
+    dest_path = Path(dest_dir)
+
+    if not source_path.is_dir():
+        typer.echo(f"Source is not a valid directory: {source_path}", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        dest_path.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        typer.echo(f"Could not create destination directory: {dest_path} ({e})", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(
+        f"{'Dry-running' if dry_run else 'Restoring'} folder from:\n"
+        f"  Source:      {source_path}\n"
+        f"  Destination: {dest_path}\n"
+        f"  Overwrite:   {'yes' if overwrite else 'no (skip different existing files)'}"
+    )
+
+    files = [f for f in source_path.rglob("*") if f.is_file()]
+
+    if not files:
+        typer.echo("No files found in source directory.")
+        return
+
+    copied = 0
+    skipped = 0
+    conflicts = 0
+    errors = 0
+
+    with typer.progressbar(files, label="Restoring") as progress:
+        for src in progress:
+            try:
+                rel = src.relative_to(source_path)
+                dest_file = dest_path / rel
+                dest_dir_path = dest_file.parent
+                dest_dir_path.mkdir(parents=True, exist_ok=True)
+
+                src_size = src.stat().st_size
+
+                if dest_file.exists():
+                    try:
+                        dest_size = dest_file.stat().st_size
+                    except (OSError, FileNotFoundError):
+                        dest_size = -1
+
+                    if dest_size == src_size:
+                        skipped += 1
+                        continue
+
+                    # Sizes differ
+                    if not overwrite:
+                        conflicts += 1
+                        typer.echo(
+                            f"\nConflict (sizes differ, not overwriting): {rel} "
+                            f"({src_size} -> {dest_size})"
+                        )
+                        continue
+
+                    if dry_run:
+                        copied += 1
+                        typer.echo(f"\nWOULD OVERWRITE: {rel}")
+                        continue
+
+                    # Overwrite existing file
+                    if copy_and_verify(src, dest_dir_path):
+                        copied += 1
+                    else:
+                        errors += 1
+                    continue
+
+                # Destination file doesn't exist
+                if dry_run:
+                    copied += 1
+                    typer.echo(f"\nWOULD COPY: {rel}")
+                    continue
+
+                if copy_and_verify(src, dest_dir_path):
+                    copied += 1
+                else:
+                    errors += 1
+
+            except Exception as e:
+                errors += 1
+                typer.echo(f"\n[ERROR] Could not process {src}: {e}", err=True)
+
+    typer.echo("\nRestore summary")
+    typer.echo("---------------")
+    typer.echo(f"Files considered: {len(files)}")
+    typer.echo(f"Copied{' (simulated)' if dry_run else ''}: {copied}")
+    typer.echo(f"Skipped (already same): {skipped}")
+    typer.echo(f"Conflicts (different, not overwritten): {conflicts}")
+    if errors:
+        typer.echo(f"Errors: {errors}", err=True)
 
 def create_select_file(shoot_name: str, file_name: str, tags_str: str, work_ssd_path: Path, archive_path: Path):
     """
