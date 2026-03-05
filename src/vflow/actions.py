@@ -99,13 +99,31 @@ def _is_duplicate(file_path: Path, dest_dir: Path) -> bool:
     dest_file = dest_dir / file_path.name
     if not dest_file.exists():
         return False
-    
+
     try:
         source_size = file_path.stat().st_size
         dest_size = dest_file.stat().st_size
         return source_size == dest_size
     except Exception:
         return False
+
+
+def _build_destination_index(root: Path) -> set[tuple[str, int]]:
+    """
+    Build a set of (filename, size) for all video files under root.
+    Used to skip files already ingested anywhere in laptop or archive (cross-shoot).
+    """
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    index = set()
+    if not root.exists():
+        return index
+    for f in root.rglob('*'):
+        if f.is_file() and f.suffix.lower() in video_extensions:
+            try:
+                index.add((f.name, f.stat().st_size))
+            except (OSError, FileNotFoundError):
+                pass
+    return index
 
 def _extract_number_from_filename(filename: str) -> Optional[int]:
     """
@@ -154,6 +172,185 @@ def _parse_range_pattern(pattern: str) -> tuple[Optional[str], Optional[int], Op
             return (prefix, start_num, end_num)
     
     return (None, None, None)  # Not a range
+
+def ingest_report(source_dir: str, archive_path: Path, laptop_path: Optional[Path] = None, priority_day: Optional[int] = None, priority_month: Optional[int] = None):
+    """
+    Scans SD card (or source) for video files, compares against BOTH laptop ingest
+    and archive, and reports what has not been ingested. A file is considered
+    ingested if it exists (same name and size) in either destination.
+    Optionally highlights a priority date (e.g. 28th).
+    """
+    source_path = Path(source_dir)
+    if not source_path.exists() or not source_path.is_dir():
+        typer.echo(f"Source directory not found: {source_path}", err=True)
+        raise typer.Exit(code=1)
+
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    all_files = []
+    for file_path in source_path.rglob('*'):
+        if file_path.is_file() and file_path.suffix.lower() in video_extensions:
+            all_files.append(file_path)
+
+    if not all_files:
+        typer.echo("No video files found in the source directory.", err=True)
+        return
+
+    # Build separate indexes: (filename, size) in laptop and in archive
+    laptop_index = set()
+    if laptop_path and laptop_path.exists():
+        for f in laptop_path.rglob('*'):
+            if f.is_file() and f.suffix.lower() in video_extensions:
+                try:
+                    laptop_index.add((f.name, f.stat().st_size))
+                except (OSError, FileNotFoundError):
+                    pass
+
+    archive_raw = archive_path / "Video" / "RAW"
+    archive_index = set()
+    if archive_raw.exists():
+        for f in archive_raw.rglob('*'):
+            if f.is_file() and f.suffix.lower() in video_extensions:
+                try:
+                    archive_index.add((f.name, f.stat().st_size))
+                except (OSError, FileNotFoundError):
+                    pass
+
+    # SD card = source of truth. For each file on SD: check laptop, check archive.
+    from collections import defaultdict
+    by_date = defaultdict(list)  # date -> [(path, size, in_laptop, in_archive), ...]
+    for f in all_files:
+        try:
+            dt = _get_media_date(f)
+            d = dt.date()
+            size = f.stat().st_size
+            key = (f.name, size)
+            in_laptop = key in laptop_index
+            in_archive = key in archive_index
+            by_date[d].append((f, size, in_laptop, in_archive))
+        except (OSError, FileNotFoundError):
+            continue
+
+    dates_sorted = sorted(by_date.keys())
+
+    typer.echo("\n" + "=" * 70)
+    typer.echo("INGEST REPORT (SD CARD = SOURCE OF TRUTH)")
+    typer.echo("=" * 70)
+    typer.echo(f"SD card: {source_path}")
+    typer.echo(f"Laptop:  {laptop_path}")
+    typer.echo(f"Archive: {archive_raw}")
+    typer.echo(f"Total on SD: {len(all_files)}  |  Laptop index: {len(laptop_index)}  |  Archive index: {len(archive_index)}")
+    typer.echo("=" * 70)
+
+    not_on_laptop_by_date = {}
+    not_on_archive_by_date = {}
+    for d in dates_sorted:
+        items = by_date[d]
+        on_laptop = sum(1 for _, _, lb, _ in items if lb)
+        on_archive = sum(1 for _, _, _, ab in items if ab)
+        missing_laptop = [x for x in items if not x[2]]
+        missing_archive = [x for x in items if not x[3]]
+        not_on_laptop_by_date[d] = missing_laptop
+        not_on_archive_by_date[d] = missing_archive
+        priority_mark = ""
+        if priority_day is not None and d.day == priority_day:
+            if priority_month is None or d.month == priority_month:
+                priority_mark = "  << PRIORITY"
+        typer.echo(f"\n{d}  on SD: {len(items)}  |  laptop: {on_laptop}/{len(items)}  |  archive: {on_archive}/{len(items)}{priority_mark}")
+        if missing_laptop:
+            names = sorted(x[0].name for x in missing_laptop)
+            typer.echo(f"   Missing from laptop:  {', '.join(names) if len(names) <= 10 else f'{names[0]} .. {names[-1]} ({len(names)} files)'}")
+        if missing_archive:
+            names = sorted(x[0].name for x in missing_archive)
+            typer.echo(f"   Missing from archive: {', '.join(names) if len(names) <= 10 else f'{names[0]} .. {names[-1]} ({len(names)} files)'}")
+
+    # Summary: what laptop has from SD, what archive has from SD
+    on_both = sum(1 for d in dates_sorted for (_, _, lb, ab) in by_date[d] if lb and ab)
+    laptop_only_from_sd = sum(1 for d in dates_sorted for (_, _, lb, ab) in by_date[d] if lb and not ab)
+    archive_only_from_sd = sum(1 for d in dates_sorted for (_, _, lb, ab) in by_date[d] if ab and not lb)
+    on_neither = sum(1 for d in dates_sorted for (_, _, lb, ab) in by_date[d] if not lb and not ab)
+
+    typer.echo("\n" + "=" * 70)
+    typer.echo("SUMMARY (files on SD card)")
+    typer.echo("=" * 70)
+    typer.echo(f"  On both laptop + archive: {on_both}")
+    typer.echo(f"  On laptop only:           {laptop_only_from_sd}")
+    typer.echo(f"  On archive only:          {archive_only_from_sd}")
+    typer.echo(f"  On neither (not ingested): {on_neither}")
+    typer.echo("=" * 70)
+
+    if on_neither > 0:
+        typer.echo("\nSUGGESTED INGEST (missing from both):")
+        for d in dates_sorted:
+            not_ing = [x for x in by_date[d] if not x[2] and not x[3]]
+            if not not_ing:
+                continue
+            names = sorted(x[0].name for x in not_ing)
+            nums = [_extract_number_from_filename(n) for n in names]
+            nums = [n for n in nums if n is not None]
+            if nums:
+                typer.echo(f"  {d}:  --files C{min(nums)}-C{max(nums)}  ({len(not_ing)} files)")
+    typer.echo("")
+
+def list_duplicates(root: Path, max_age_hours: Optional[int] = None) -> list[tuple[tuple[str, int], list[Path]]]:
+    """
+    Find all duplicate files (same name + size) under root. Returns list of
+    ((name, size), [path1, path2, ...]) for each group with more than one path.
+    If max_age_hours is set, only consider files modified in the last N hours.
+    """
+    import time
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    cutoff = (time.time() - max_age_hours * 3600) if max_age_hours else None
+    by_key = {}  # (name, size) -> [path, ...]
+    for f in root.rglob('*'):
+        if f.is_file() and f.suffix.lower() in video_extensions:
+            try:
+                st = f.stat()
+                if cutoff is not None and st.st_mtime < cutoff:
+                    continue
+                key = (f.name, st.st_size)
+                by_key.setdefault(key, []).append(f)
+            except (OSError, FileNotFoundError):
+                pass
+    return [(key, paths) for key, paths in by_key.items() if len(paths) > 1]
+
+def remove_duplicates(root: Path, dry_run: bool = False, max_age_hours: Optional[int] = None) -> int:
+    """
+    Within a root folder (e.g. archive Video/RAW or laptop Ingest), find all video
+    files and remove duplicates: same (filename, size) in multiple places. Keeps
+    one copy (first by path sort) and deletes the rest. Returns number removed.
+    If max_age_hours is set, only consider files modified in the last N hours.
+    """
+    import time
+    video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.avi', '.m4v'}
+    cutoff = (time.time() - max_age_hours * 3600) if max_age_hours else None
+    by_key = {}  # (name, size) -> [path, ...]
+    for f in root.rglob('*'):
+        if f.is_file() and f.suffix.lower() in video_extensions:
+            try:
+                st = f.stat()
+                if cutoff is not None and st.st_mtime < cutoff:
+                    continue
+                key = (f.name, st.st_size)
+                by_key.setdefault(key, []).append(f)
+            except (OSError, FileNotFoundError):
+                pass
+    removed = 0
+    for key, paths in by_key.items():
+        if len(paths) <= 1:
+            continue
+        paths_sorted = sorted(paths, key=lambda p: str(p))
+        keep, duplicates = paths_sorted[0], paths_sorted[1:]
+        for dup in duplicates:
+            if dry_run:
+                typer.echo(f"  [dry-run] would remove duplicate: {dup}")
+            else:
+                try:
+                    dup.unlink()
+                    typer.echo(f"  Removed duplicate: {dup.relative_to(root)}")
+                    removed += 1
+                except OSError as e:
+                    typer.echo(f"  [ERROR] Could not remove {dup}: {e}", err=True)
+    return removed
 
 def _matches_pattern(pattern: str, filename: str) -> bool:
     """
@@ -241,7 +438,7 @@ def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_de
         typer.echo(f"\nFound {len(files_to_ingest)} file(s) matching filter (out of {len(all_files)} total).")
     else:
         files_to_ingest = all_files
-        typer.echo(f"\nFound {len(files_to_ingest)} video file(s) to ingest.")
+    typer.echo(f"\nFound {len(files_to_ingest)} video file(s) to ingest.")
 
     # 2. Extract dates and prepare clusters
     files_with_dates = [(f, _get_media_date(f)) for f in files_to_ingest]
@@ -253,6 +450,12 @@ def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_de
             typer.echo(f"✓ Splitting footage into {len(clusters)} shoots (gap > {split_threshold}h).")
     else:
         clusters = [[f for f, d in files_with_dates]]
+
+    # Global (name, size) indexes so we skip files already ingested anywhere (any shoot)
+    archive_raw_root = archive_dest / "Video" / "RAW"
+    laptop_index = _build_destination_index(laptop_dest)
+    archive_index = _build_destination_index(archive_raw_root)
+    typer.echo(f"Laptop ingest index: {len(laptop_index)} file(s). Archive index: {len(archive_index)} file(s).")
 
     # Process each cluster as a separate shoot
     for i, cluster_files in enumerate(clusters):
@@ -399,29 +602,34 @@ def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_de
 
         with typer.progressbar(cluster_files, label=f"Ingesting {target_shoot_name}") as progress:
             for file_path in progress:
-                # Check duplicates
-                laptop_dup = _is_duplicate(file_path, laptop_shoot_dir) if copy_to_laptop else False
-                archive_dup = _is_duplicate(file_path, archive_shoot_dir) if copy_to_archive else False
+                try:
+                    file_key = (file_path.name, file_path.stat().st_size)
+                except OSError:
+                    file_key = (file_path.name, 0)
+                # Check duplicates: global index (any shoot) so 28th already ingested is skipped when ingesting 28+29
+                laptop_dup = (file_key in laptop_index) if copy_to_laptop else False
+                archive_dup = (file_key in archive_index) if copy_to_archive else False
                 workspace_dup = _is_duplicate(file_path, workspace_shoot_dir) if copy_to_workspace else False
-                
+
                 # Skip if all targets are duplicates
                 all_dups = True
                 if copy_to_laptop and not laptop_dup: all_dups = False
                 if copy_to_archive and not archive_dup: all_dups = False
                 if copy_to_workspace and not workspace_dup: all_dups = False
-                
+
                 if all_dups:
                     skipped_count += 1
                     continue
 
                 file_copied = False
-                
+
                 # Copy to Laptop
                 if copy_to_laptop and not laptop_dup:
                     try:
                         typer.echo(f"  -> Laptop: {laptop_shoot_dir}")
                         if copy_and_verify(file_path, laptop_shoot_dir):
                             file_copied = True
+                            laptop_index.add(file_key)
                         else:
                             error_count += 1
                     except OSError as e:
@@ -438,6 +646,7 @@ def ingest_shoot(source_dir: str, shoot_name: str, laptop_dest: Path, archive_de
                         typer.echo(f"  -> Archive: {archive_shoot_dir}")
                         if copy_and_verify(file_path, archive_shoot_dir):
                             file_copied = True
+                            archive_index.add(file_key)
                         else:
                             error_count += 1
                     except OSError as e:
@@ -982,7 +1191,17 @@ def copy_metadata_folder(source_folder: Path, target_folder: Path):
 
     typer.echo(f"\nMetadata copy complete. {success_count} files updated, {fail_count} files skipped.")
 
-def consolidate_files(source_dir: str, output_folder_name: Optional[str], archive_path: Path, destination_path: Optional[str] = None, file_filter: Optional[list[str]] = None, tags: Optional[str] = None, preserve_structure: bool = True):
+def consolidate_files(
+    source_dir: str,
+    output_folder_name: Optional[str],
+    archive_path: Path,
+    destination_path: Optional[str] = None,
+    file_filter: Optional[list[str]] = None,
+    tags: Optional[str] = None,
+    preserve_structure: bool = True,
+    dry_run: bool = False,
+    delete_source: bool = False,
+):
     """
     Finds unique files from a source directory and copies them to the archive.
     
@@ -1010,11 +1229,13 @@ def consolidate_files(source_dir: str, output_folder_name: Optional[str], archiv
         typer.echo("Either --output-folder or --destination must be provided.", err=True)
         raise typer.Exit(code=1)
 
-    try:
-        output_path.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        typer.echo(f"Could not create output directory: {e}", err=True)
-        raise typer.Exit(code=1)
+    # For dry-run we don't actually create anything on disk
+    if not dry_run:
+        try:
+            output_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            typer.echo(f"Could not create output directory: {e}", err=True)
+            raise typer.Exit(code=1)
 
     # --- 1. Build index of the archive ---
     typer.echo("Building index of existing archive files (this may take a moment)...")
@@ -1073,13 +1294,65 @@ def consolidate_files(source_dir: str, output_folder_name: Optional[str], archiv
     else:
         typer.echo(f"Found {len(source_files)} video file(s) to process.")
 
-    typer.echo(f"Copying unique files to: {output_path}")
-    copied_log_path = output_path / "copied_files.txt"
-    skipped_log_path = output_path / "skipped_duplicates.txt"
+    typer.echo(f"{'Dry-run: would copy unique files to' if dry_run else 'Copying unique files to'}: {output_path}")
 
     copied_count = 0
     skipped_count = 0
     error_count = 0
+    copied_sources: list[Path] = []
+
+    if dry_run:
+        with typer.progressbar(source_files, label="Analyzing for backup") as progress:
+            for file in progress:
+                try:
+                    # Determine destination path
+                    if preserve_structure:
+                        rel_path = file.relative_to(source_path)
+                        dest_file = output_path / rel_path
+                    else:
+                        dest_file = output_path / file.name
+
+                    file_id = (file.name, file.stat().st_size)
+
+                    # Check archive-wide duplicates
+                    if file_id in archive_index:
+                        skipped_count += 1
+                        typer.echo(f"SKIP (already in archive): {file}")
+                        continue
+
+                    # Check if destination file already exists (by size)
+                    if dest_file.exists():
+                        try:
+                            source_size = file.stat().st_size
+                            dest_size = dest_file.stat().st_size
+                            if source_size == dest_size:
+                                skipped_count += 1
+                                typer.echo(f"SKIP (already at destination): {file}")
+                                continue
+                        except Exception:
+                            pass  # If we can't check, treat as would-copy
+
+                    copied_count += 1
+                    typer.echo(f"WOULD COPY: {file} -> {dest_file}")
+                    if delete_source:
+                        typer.echo(f"WOULD DELETE AFTER COPY (after manual confirmation): {file}")
+
+                except FileNotFoundError:
+                    continue  # Ignore broken symlinks
+                except Exception as e:
+                    typer.echo(f"\n[ERROR] Could not analyze {file.name}: {e}", err=True)
+                    error_count += 1
+
+        typer.echo("\nBackup dry-run complete.")
+        typer.echo(f"{copied_count} file(s) would be copied.")
+        typer.echo(f"{skipped_count} file(s) would be skipped as duplicates.")
+        if error_count > 0:
+            typer.echo(f"Errors during analysis: {error_count}", err=True)
+        return
+
+    # Real copy mode with logs
+    copied_log_path = output_path / "copied_files.txt"
+    skipped_log_path = output_path / "skipped_duplicates.txt"
 
     with copied_log_path.open("w") as copied_log, skipped_log_path.open("w") as skipped_log:
         with typer.progressbar(source_files, label="Consolidating") as progress:
@@ -1133,6 +1406,10 @@ def consolidate_files(source_dir: str, output_folder_name: Optional[str], archiv
                                 shutil.move(str(tagged_file), str(dest_file))
                             except Exception as e:
                                 typer.echo(f"\n⚠ Warning: Could not tag {dest_file.name}: {e}", err=True)
+                        
+                        # Track for potential deletion after all copies complete
+                        if delete_source:
+                            copied_sources.append(file)
                     else:
                         error_count += 1
                         
@@ -1148,6 +1425,169 @@ def consolidate_files(source_dir: str, output_folder_name: Optional[str], archiv
     if error_count > 0:
         typer.echo(f"Errors: {error_count}", err=True)
     typer.echo(f"See log files in {output_path} for details.")
+
+    # Optional post-copy delete flow with explicit confirmation
+    if delete_source and copied_sources:
+        typer.echo("\nBackup step finished.")
+        typer.echo(f"{len(copied_sources)} source file(s) are eligible for deletion (only files that were actually copied).")
+        confirm = typer.confirm("Do you want to delete these source files from the backup source folder now?")
+        if confirm:
+            deleted = 0
+            delete_errors = 0
+            for src in copied_sources:
+                try:
+                    if src.exists():
+                        src.unlink()
+                        deleted += 1
+                except Exception as e:
+                    delete_errors += 1
+                    typer.echo(f"⚠ Warning: Could not delete source file {src}: {e}", err=True)
+            typer.echo(f"\nSource cleanup complete. Deleted {deleted} file(s).")
+            if delete_errors:
+                typer.echo(f"{delete_errors} file(s) could not be deleted. See warnings above.", err=True)
+        else:
+            typer.echo("\nNo source files were deleted. You can safely inspect the archive and rerun backup with --delete-source later if desired.")
+
+
+def verify_backup(
+    source_dir: str,
+    dest_dir: str,
+    allow_delete: bool = False,
+    archive_wide: bool = False,
+) -> None:
+    """
+    Verify that all files in source_dir exist in dest_dir with the same relative path and size.
+
+    This is a generic "did my backup work?" checker for any two folders.
+    Optionally offers to delete the source files if everything matches.
+    """
+    source_path = Path(source_dir)
+    dest_path = Path(dest_dir)
+
+    if not source_path.is_dir():
+        typer.echo(f"Source is not a valid directory: {source_path}", err=True)
+        raise typer.Exit(code=1)
+    if not dest_path.is_dir():
+        typer.echo(f"Destination is not a valid directory: {dest_path}", err=True)
+        raise typer.Exit(code=1)
+
+    scope_desc = "archive-wide (by name+size anywhere under destination)" if archive_wide else "by relative path"
+    typer.echo(
+        f"Verifying backup from:\n"
+        f"  Source:      {source_path}\n"
+        f"  Destination: {dest_path}\n"
+        f"  Scope:       {scope_desc}"
+    )
+
+    # Build index of destination files
+    if archive_wide:
+        # Archive-wide: (name, size) anywhere under dest_dir
+        dest_index_name_size: set[tuple[str, int]] = set()
+        for f in dest_path.rglob("*"):
+            if f.is_file():
+                try:
+                    dest_index_name_size.add((f.name, f.stat().st_size))
+                except (OSError, FileNotFoundError):
+                    continue
+    else:
+        # Exact mirror: relative path -> size
+        dest_index: dict[Path, int] = {}
+        for f in dest_path.rglob("*"):
+            if f.is_file():
+                try:
+                    rel = f.relative_to(dest_path)
+                    dest_index[rel] = f.stat().st_size
+                except (OSError, FileNotFoundError):
+                    continue
+
+    missing: list[Path] = []
+    size_mismatch: list[tuple[Path, int, int]] = []
+    checked = 0
+
+    for f in source_path.rglob("*"):
+        if not f.is_file():
+            continue
+        try:
+            rel = f.relative_to(source_path)
+            size = f.stat().st_size
+        except (OSError, FileNotFoundError):
+            continue
+        checked += 1
+
+        if archive_wide:
+            if (f.name, size) not in dest_index_name_size:
+                missing.append(rel)
+        else:
+            dest_size = dest_index.get(rel)
+            if dest_size is None:
+                missing.append(rel)
+            elif dest_size != size:
+                size_mismatch.append((rel, size, dest_size))
+
+    typer.echo("\nVerification summary")
+    typer.echo("--------------------")
+    typer.echo(f"Files checked in source: {checked}")
+    typer.echo(f"Missing in destination:  {len(missing)}")
+    typer.echo(f"Size mismatches:         {len(size_mismatch)}")
+
+    if missing:
+        typer.echo("\nMissing files (relative to source root):")
+        for rel in missing[:20]:
+            typer.echo(f"  - {rel}")
+        if len(missing) > 20:
+            typer.echo(f"  ... and {len(missing) - 20} more.")
+
+    if size_mismatch:
+        typer.echo("\nFiles with size mismatch (relative path | source size -> dest size):")
+        for rel, s_size, d_size in size_mismatch[:20]:
+            typer.echo(f"  - {rel} | {s_size} -> {d_size}")
+        if len(size_mismatch) > 20:
+            typer.echo(f"  ... and {len(size_mismatch) - 20} more.")
+
+    if missing or size_mismatch:
+        typer.echo(
+            "\nBackup verification FAILED. Some files are missing or differ in size. "
+            "Please investigate before deleting anything.",
+            err=True,
+        )
+        return
+
+    typer.echo("\nBackup verification PASSED. All source files exist in destination with matching sizes.")
+
+    if not allow_delete:
+        return
+
+    # Offer to delete source files now that verification passed
+    confirm = typer.confirm(
+        f"\nDo you want to delete all files under the source folder now?\n  Source: {source_path}\n"
+    )
+    if not confirm:
+        typer.echo("\nNo files were deleted. Source remains intact.")
+        return
+
+    deleted = 0
+    delete_errors = 0
+    for f in source_path.rglob("*"):
+        if f.is_file():
+            try:
+                f.unlink()
+                deleted += 1
+            except Exception as e:
+                delete_errors += 1
+                typer.echo(f"⚠ Warning: Could not delete file {f}: {e}", err=True)
+
+    # Optionally try to remove empty directories
+    for d in sorted(source_path.rglob("*"), key=lambda p: len(str(p)), reverse=True):
+        if d.is_dir():
+            try:
+                d.rmdir()
+            except OSError:
+                # Not empty; leave it
+                pass
+
+    typer.echo(f"\nSource cleanup complete. Deleted {deleted} file(s).")
+    if delete_errors:
+        typer.echo(f"{delete_errors} file(s) could not be deleted. See warnings above.", err=True)
 
 def create_select_file(shoot_name: str, file_name: str, tags_str: str, work_ssd_path: Path, archive_path: Path):
     """

@@ -1,6 +1,7 @@
 import typer
 import yaml
 from pathlib import Path
+from typing import Optional
 from . import config
 
 app = typer.Typer()
@@ -45,6 +46,97 @@ def ingest(
         split_by_gap = config.get_setting(app_config, "default_split_gap", 0)
     
     actions.ingest_shoot(source, shoot, laptop_dest, archive_dest, auto=auto, force=force, skip_laptop=skip_laptop, workspace_dest=workspace_dest, split_threshold=split_by_gap, files_filter=files)
+
+@app.command("ingest-report")
+def ingest_report_cmd(
+    source: str = typer.Option(..., "--source", "-s", help="SD card CLIP folder (e.g., '/Volumes/Untitled/private/M4ROOT/CLIP')"),
+    priority_day: int = typer.Option(28, "--priority-day", help="Day of month to highlight as priority (e.g. 28 for the 28th)"),
+    priority_month: Optional[int] = typer.Option(None, "--priority-month", help="Month for priority day (optional; if omitted, any 28th on card is highlighted)"),
+):
+    """
+    Report what on the SD card has not been ingested yet.
+    Compares source to BOTH laptop ingest and archive (duplicate = same name+size in either).
+    Highlights a priority day (default 28th) for editing.
+    """
+    app_config = config.load_config()
+    archive_dest = config.get_location(app_config, "archive_hdd")
+    laptop_dest = config.get_location(app_config, "laptop")
+    actions.ingest_report(source, archive_dest, laptop_path=laptop_dest, priority_day=priority_day, priority_month=priority_month)
+
+@app.command("list-duplicates")
+def list_duplicates_cmd(
+    location: str = typer.Option("archive", "--location", "-l", help="Where to scan: 'archive', 'laptop', or 'both'"),
+    past_hours: Optional[int] = typer.Option(None, "--past-hours", "-H", help="Only consider files modified in the last N hours (e.g. 24 for newly ingested)"),
+):
+    """
+    List duplicate files (same name + size in multiple places) in archive and/or laptop.
+    Use --past-hours 24 to only check files ingested in the last 24 hours.
+    """
+    app_config = config.load_config()
+    archive_dest = config.get_location(app_config, "archive_hdd")
+    laptop_dest = config.get_location(app_config, "laptop")
+
+    def report_duplicates(label: str, root: Path) -> None:
+        if not root.exists():
+            typer.echo(f"{label}: path not found ({root})")
+            return
+        dupes = actions.list_duplicates(root, max_age_hours=past_hours)
+        typer.echo(f"\n{'='*70}")
+        typer.echo(f"{label}")
+        typer.echo(f"{'='*70}")
+        typer.echo(f"Scanned: {root}" + (f" (only files modified in last {past_hours}h)" if past_hours else ""))
+        typer.echo(f"Duplicate groups: {len(dupes)}")
+        total_extra = sum(len(paths) - 1 for _, paths in dupes)
+        typer.echo(f"Extra copies (could be removed): {total_extra}")
+        typer.echo("")
+        for (name, size), paths in sorted(dupes, key=lambda x: (x[0][0], x[0][1])):
+            paths_sorted = sorted(paths, key=lambda p: str(p))
+            typer.echo(f"  {name}  ({size} bytes)  appears {len(paths_sorted)} times:")
+            for p in paths_sorted:
+                try:
+                    rel = p.relative_to(root)
+                except ValueError:
+                    rel = p
+                typer.echo(f"    - {rel}")
+            typer.echo("")
+
+    if location in ("archive", "both"):
+        archive_raw = archive_dest / "Video" / "RAW"
+        report_duplicates("ARCHIVE (Video/RAW)", archive_raw)
+    if location in ("laptop", "both"):
+        report_duplicates("LAPTOP (Ingest)", laptop_dest)
+    if location not in ("archive", "laptop", "both"):
+        typer.echo("Invalid --location. Use 'archive', 'laptop', or 'both'.", err=True)
+        raise typer.Exit(code=1)
+
+@app.command("remove-duplicates")
+def remove_duplicates_cmd(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Only report what would be removed"),
+    past_hours: Optional[int] = typer.Option(None, "--past-hours", "-H", help="Only consider files modified in the last N hours (e.g. 24 for newly ingested)"),
+):
+    """
+    Remove duplicate files (same name + size in multiple shoot folders) from
+    archive Video/RAW and laptop ingest. Keeps one copy per file, deletes the rest.
+    Use --past-hours 24 to only remove duplicates among recently ingested files.
+    """
+    app_config = config.load_config()
+    archive_dest = config.get_location(app_config, "archive_hdd")
+    laptop_dest = config.get_location(app_config, "laptop")
+    archive_raw = archive_dest / "Video" / "RAW"
+    suffix = f" (only files modified in last {past_hours}h)" if past_hours else ""
+    typer.echo("Scanning archive for duplicates...")
+    if archive_raw.exists():
+        n_archive = actions.remove_duplicates(archive_raw, dry_run=dry_run, max_age_hours=past_hours)
+        typer.echo(f"Archive: {n_archive} duplicate(s) {'would be ' if dry_run else ''}removed.{suffix}")
+    else:
+        typer.echo("Archive Video/RAW not found.")
+    typer.echo("Scanning laptop ingest for duplicates...")
+    if laptop_dest.exists():
+        n_laptop = actions.remove_duplicates(laptop_dest, dry_run=dry_run, max_age_hours=past_hours)
+        typer.echo(f"Laptop: {n_laptop} duplicate(s) {'would be ' if dry_run else ''}removed.{suffix}")
+    else:
+        typer.echo("Laptop ingest folder not found.")
+    typer.echo("Done.")
 
 @app.command()
 def prep(
@@ -162,7 +254,87 @@ def consolidate(
     app_config = config.load_config()
     archive_hdd_dest = config.get_location(app_config, "archive_hdd")
     
-    actions.consolidate_files(source, output_folder, archive_hdd_dest, destination_path=destination, file_filter=files, tags=tags, preserve_structure=True)
+    actions.consolidate_files(
+        source,
+        output_folder,
+        archive_hdd_dest,
+        destination_path=destination,
+        file_filter=files,
+        tags=tags,
+        preserve_structure=True,
+    )
+
+
+@app.command()
+def backup(
+    source: str = typer.Option(..., "--source", "-s", help="Source directory to back up (e.g., '~/Desktop/Ingest')."),
+    destination: str = typer.Option(..., "--destination", "-d", help="Path relative to archive root (e.g., 'Video/RAW/2025-10-12_Shoot')."),
+    files: list[str] = typer.Option(None, "--files", "-f", help="Optional: Specific filenames, patterns, or ranges to back up (e.g., 'C3317' or 'C3317-C3351'). Can specify multiple times. If omitted, processes all files."),
+    tags: str = typer.Option(None, "--tags", "-t", help="Optional: Comma-separated metadata tags to add to copied files."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Analyze what would be backed up without copying any files."),
+    delete_source: bool = typer.Option(
+        False,
+        "--delete-source",
+        help="After copying, prompt to optionally delete source files that were successfully backed up.",
+    ),
+):
+    """
+    Backs up media from an arbitrary source folder into the archive with duplicate checks.
+
+    This is a friendly wrapper around the consolidate logic, intended for backing up
+    ingest folders or project folders (e.g., Desktop/Ingest) into your archive drive.
+
+    Use --dry-run first to see which files are not already in the archive.
+    """
+    typer.echo(f"{'Dry-running' if dry_run else 'Backing up'} from '{source}' to archive destination '{destination}'...")
+    if delete_source and dry_run:
+        typer.echo(
+            "Note: --delete-source is set; this dry-run will only report which files would be eligible for deletion after a real backup."
+        )
+
+    app_config = config.load_config()
+    archive_hdd_dest = config.get_location(app_config, "archive_hdd")
+
+    actions.consolidate_files(
+        source,
+        output_folder_name=None,
+        archive_path=archive_hdd_dest,
+        destination_path=destination,
+        file_filter=files,
+        tags=tags,
+        preserve_structure=True,
+        dry_run=dry_run,
+        delete_source=delete_source,
+    )
+
+
+@app.command("verify-backup")
+def verify_backup_cmd(
+    source: str = typer.Option(..., "--source", "-s", help="Source directory that was backed up."),
+    destination: str = typer.Option(
+        ..., "--destination", "-d", help="Destination directory where backup was written."
+    ),
+    allow_delete: bool = typer.Option(
+        False,
+        "--allow-delete",
+        help="After successful verification, prompt to delete all files under the source folder.",
+    ),
+    archive_wide: bool = typer.Option(
+        False,
+        "--archive-wide",
+        help="Treat destination as an archive root and verify that each source file exists "
+        "anywhere under it by name+size, instead of requiring a path-for-path mirror.",
+    ),
+):
+    """
+    Verify that all files in a source folder exist in a destination folder with matching sizes.
+
+    This is a general-purpose checker for any two folders (e.g. Desktop/Ingest vs archive).
+    Use together with 'backup' or any other copy method to confirm that your backup is complete
+    before optionally deleting the source files.
+    """
+    typer.echo(f"Verifying backup between source '{source}' and destination '{destination}'...")
+    actions.verify_backup(source, destination, allow_delete=allow_delete, archive_wide=archive_wide)
 
 @app.command()
 def copy_meta(
