@@ -1,6 +1,6 @@
 [project]
 name = "vflow-cli"
-version = "0.1.1"
+version = "0.1.2"
 description = "The v-flow CLI and Claude skills bundle for automating media backup and processing workflows for videographers."
 authors = [{ name = "Kaung", email = "kaungzinye@gmail.com" }]
 readme = "README.md"

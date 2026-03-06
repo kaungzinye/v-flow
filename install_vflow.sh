@@ -4,12 +4,25 @@ set -euo pipefail
 echo "v-flow installer"
 echo "----------------"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILLS_SRC="${SCRIPT_DIR}/skills"
+# Determine where to load skills from.
+# If the script is on disk (run from a checkout), use that directory.
+# If it's being piped via curl, download the repo archive to a temp directory.
+if [ -n "${BASH_SOURCE-}" ] && [ -n "${BASH_SOURCE[0]-}" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  REPO_ROOT="${SCRIPT_DIR}"
+else
+  echo "No local script path detected, downloading v-flow skills from GitHub..."
+  TMP_DIR="$(mktemp -d)"
+  curl -fsSL https://github.com/kaungzinye/v-flow/archive/refs/heads/main.tar.gz \
+    | tar -xz -C "${TMP_DIR}"
+  REPO_ROOT="${TMP_DIR}/v-flow-main"
+fi
+
+SKILLS_SRC="${REPO_ROOT}/skills"
 
 if [ ! -d "${SKILLS_SRC}" ]; then
   echo "Error: skills directory not found at ${SKILLS_SRC}."
-  echo "Run this script from a v-flow checkout that contains the skills/ folder."
+  echo "Make sure the v-flow repo is available, or re-run this installer from the published URL."
   exit 1
 fi
 
