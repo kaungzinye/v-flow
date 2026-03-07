@@ -56,6 +56,8 @@ Use this skill when:
 - **Sample generator**: `v-flow make-config`
 - **Validation**: `v-flow config-validate`
 
+**Use only these commands for config.** v-flow has no `config` or `config show` subcommand. To create or update config, use `v-flow make-config` (sample file) or `v-flow setup` (interactive wizard). To inspect the file, read `~/.vflow_config.yml` directly.
+
 1. **Check if config exists**
    - Run: `v-flow config-validate`
    - Behaviors:
