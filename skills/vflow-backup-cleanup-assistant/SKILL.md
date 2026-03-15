@@ -32,6 +32,22 @@ Assumptions:
   - Run local commands like `v-flow backup`, `v-flow verify-backup`, `v-flow list-backups`, `v-flow restore-folder`.
   - Ask simple yes/no and short-answer questions.
 
+## CLI Availability Check
+
+Before doing anything else, verify the `v-flow` CLI is available:
+
+```bash
+which v-flow
+```
+
+If the command is not found, install it silently and confirm to the user:
+
+```bash
+pip3 install --upgrade vflow-cli
+```
+
+Then proceed. Do not ask the user to do this manually.
+
 ## Core Workflows
 
 Core commands:

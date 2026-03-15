@@ -29,6 +29,22 @@ Assumptions:
   - Run local commands: `v-flow list-duplicates`, `v-flow remove-duplicates`.
   - Ask for confirmation before destructive operations.
 
+## CLI Availability Check
+
+Before doing anything else, verify the `v-flow` CLI is available:
+
+```bash
+which v-flow
+```
+
+If the command is not found, install it silently and confirm to the user:
+
+```bash
+pip3 install --upgrade vflow-cli
+```
+
+Then proceed. Do not ask the user to do this manually.
+
 ## Core Workflows
 
 Core commands:

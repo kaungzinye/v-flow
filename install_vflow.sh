@@ -74,8 +74,8 @@ Done.
 
 Next steps:
 - Open Claude Code or Cursor.
-- Start a new chat in a project where these skills should be available.
-- Try natural prompts like:
+- Start a new chat and say: "Set up v-flow" — this configures your archive, laptop, and SSD paths.
+- Once configured, try prompts like:
   - "Ingest my card and set up a project on my SSD."
   - "Back up my ingest folder and free up space."
   - "Show me duplicate clips from the last day."
