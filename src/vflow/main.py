@@ -394,6 +394,56 @@ def copy_meta(
 
 
 
+LOCATION_KEYS = {"laptop", "work_ssd", "archive_hdd"}
+
+@app.command()
+def locations():
+    """Show configured v-flow paths and whether they are currently mounted."""
+    app_config = config.load_config()
+    locs = app_config.get("locations", {})
+    settings = app_config.get("settings", {})
+    typer.echo("Locations:")
+    for key, path in locs.items():
+        mounted = "✓" if Path(path).exists() else "✗ not mounted"
+        typer.echo(f"  {key}: {path}  [{mounted}]")
+    if settings:
+        typer.echo("Settings:")
+        for key, val in settings.items():
+            typer.echo(f"  {key}: {val}")
+
+
+@app.command("set")
+def set_config(
+    key: str = typer.Argument(help="Config key to update. Location keys: laptop, work_ssd, archive_hdd. Settings: settings.<key> (e.g. settings.default_split_gap)."),
+    value: str = typer.Argument(help="New value for the key."),
+):
+    """Update a single config value without re-running setup.
+
+    Examples:
+      v-flow set archive_hdd "/Volumes/Kaung HDD/MediaArchive"
+      v-flow set laptop "/Users/me/Desktop/Ingest"
+      v-flow set settings.default_split_gap 24
+    """
+    app_config = config.load_config()
+
+    if key in LOCATION_KEYS:
+        app_config.setdefault("locations", {})[key] = value
+        typer.echo(f"Set locations.{key} = {value}")
+    elif key.startswith("settings."):
+        setting_key = key[len("settings."):]
+        app_config.setdefault("settings", {})[setting_key] = value
+        typer.echo(f"Set settings.{setting_key} = {value}")
+    else:
+        typer.echo(
+            f"Unknown key '{key}'. Use one of: {', '.join(sorted(LOCATION_KEYS))}, or settings.<key>.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    config.save_config(app_config)
+    typer.echo(f"Config saved to {config.CONFIG_PATH}")
+
+
 @app.command()
 def make_config():
     """

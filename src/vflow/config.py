@@ -42,3 +42,7 @@ def get_location(config: dict, name: str) -> Path:
 def get_setting(config: dict, key: str, default: any = None) -> any:
     """Gets a setting from the config, returning default if not found."""
     return config.get("settings", {}).get(key, default)
+
+def save_config(config: dict) -> None:
+    with open(CONFIG_PATH, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
