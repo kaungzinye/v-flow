@@ -14,7 +14,7 @@ compatibility: Requires local v-flow CLI, shell access, and permission to read a
 
 Help a videographer configure v-flow **without hand-editing YAML**, by:
 
-- Explaining what each logical location means (`laptop`, `work_ssd`, `archive_hdd`).
+- Explaining the Archive, Exports, and named Working Location roles.
 - Using `v-flow locations` to show current config.
 - Using `v-flow set <key> <value>` to update individual paths.
 - Using `v-flow make-config` to create a fresh config file when none exists.
@@ -28,9 +28,10 @@ Use this skill when:
 ## Config Reference
 
 - **Config file**: `~/.vflow_config.yml`
-- `locations.laptop` — where newly-ingested media lands on the laptop.
-- `locations.work_ssd` — fast SSD for active editing projects.
-- `locations.archive_hdd` — large drive for long-term storage (root path, e.g. `/Volumes/Kaung HDD/MediaArchive`).
+- `locations.archive` — protected retained storage.
+- `locations.exports` — the browsable root for exported videos.
+- `locations.working.<name>` — a named location for optional Working Copies, such as `laptop` or `work_ssd`.
+- `settings.laptop_free_space_reserve_gb` — free space preserved when the laptop is used for a Working Copy (default 50).
 - `settings.default_split_gap` — hours between clips used to auto-split shoots (default 24).
 
 ## CLI Commands
@@ -56,21 +57,22 @@ Shows all configured paths and a `✓`/`✗ not mounted` indicator for each. Use
 ### Update a single location (most common — e.g. swapping HDD)
 
 ```bash
-v-flow set archive_hdd "/Volumes/New Drive/MediaArchive"
+v-flow set archive "/Volumes/New Drive/MediaArchive"
 ```
 
-Valid keys: `laptop`, `work_ssd`, `archive_hdd`, `settings.default_split_gap`.
+Valid keys: `archive`, `exports`, `working.<name>`, and `settings.<name>`.
 
 After running, confirm with `v-flow locations`.
 
 ### First-time setup (no config file exists)
 
 1. Run `v-flow make-config` to create a sample config.
-2. Use `v-flow set` for each location:
+2. Use `v-flow set` for each role:
    ```bash
-   v-flow set laptop "/Users/yourname/Desktop/Ingest"
-   v-flow set work_ssd "/Volumes/T7/Videos/Project Files"
-   v-flow set archive_hdd "/Volumes/Kaung HDD/MediaArchive"
+   v-flow set archive "/Volumes/Kaung HDD/MediaArchive"
+   v-flow set exports "/Volumes/T7/Exports"
+   v-flow set working.laptop "/Users/yourname/Working Copies"
+   v-flow set working.work_ssd "/Volumes/T7/Working Copies"
    ```
 3. Run `v-flow locations` to confirm.
 
@@ -80,8 +82,8 @@ Read `~/.vflow_config.yml` directly if you need to see the raw YAML. Prefer `v-f
 
 ## Clarifying Questions
 
-- "Change my archive drive." → Ask: "What is the new archive drive path?" → Run `v-flow set archive_hdd "<path>"`.
-- "Set this up for me." → Ask for each of: laptop path, work SSD path, archive HDD path → Run three `v-flow set` commands.
+- "Change my archive drive." → Ask: "What is the new Archive path?" → Run `v-flow set archive "<path>"`.
+- "Set this up for me." → Ask for Archive, Exports, and the named Working Locations.
 - "v-flow says config is invalid / missing." → Run `v-flow make-config` then the `v-flow set` commands above.
 
 ## Safety Rules

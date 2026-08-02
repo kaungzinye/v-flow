@@ -35,7 +35,7 @@ def ingest(
     
     # Get locations
     laptop_dest = config.get_location(app_config, "laptop")
-    archive_dest = config.get_location(app_config, "archive_hdd")
+    archive_dest = config.get_location(app_config, "archive")
     
     workspace_dest = None
     if workspace:
@@ -59,7 +59,7 @@ def ingest_report_cmd(
     Highlights a priority day (default 28th) for editing.
     """
     app_config = config.load_config()
-    archive_dest = config.get_location(app_config, "archive_hdd")
+    archive_dest = config.get_location(app_config, "archive")
     laptop_dest = config.get_location(app_config, "laptop")
     actions.ingest_report(source, archive_dest, laptop_path=laptop_dest, priority_day=priority_day, priority_month=priority_month)
 
@@ -73,7 +73,7 @@ def list_duplicates_cmd(
     Use --past-hours 24 to only check files ingested in the last 24 hours.
     """
     app_config = config.load_config()
-    archive_dest = config.get_location(app_config, "archive_hdd")
+    archive_dest = config.get_location(app_config, "archive")
     laptop_dest = config.get_location(app_config, "laptop")
 
     def report_duplicates(label: str, root: Path) -> None:
@@ -120,7 +120,7 @@ def remove_duplicates_cmd(
     Use --past-hours 24 to only remove duplicates among recently ingested files.
     """
     app_config = config.load_config()
-    archive_dest = config.get_location(app_config, "archive_hdd")
+    archive_dest = config.get_location(app_config, "archive")
     laptop_dest = config.get_location(app_config, "laptop")
     archive_raw = archive_dest / "Video" / "RAW"
     suffix = f" (only files modified in last {past_hours}h)" if past_hours else ""
@@ -187,7 +187,7 @@ def pull(
     
     # Get locations
     work_ssd_dest = config.get_location(app_config, "work_ssd")
-    archive_dest = config.get_location(app_config, "archive_hdd")
+    archive_dest = config.get_location(app_config, "archive")
     
     actions.pull_shoot(shoot, work_ssd_dest, archive_dest, source_type=source, files_filter=files)
 
@@ -205,7 +205,7 @@ def archive(
     
     app_config = config.load_config()
     work_ssd_dest = config.get_location(app_config, "work_ssd")
-    archive_hdd_dest = config.get_location(app_config, "archive_hdd")
+    archive_hdd_dest = config.get_location(app_config, "archive")
     
     
     actions.archive_file(shoot, file, tags, keep_log, work_ssd_dest, archive_hdd_dest)
@@ -223,7 +223,7 @@ def create_select(
     
     app_config = config.load_config()
     work_ssd_dest = config.get_location(app_config, "work_ssd")
-    archive_hdd_dest = config.get_location(app_config, "archive_hdd")
+    archive_hdd_dest = config.get_location(app_config, "archive")
     
     actions.create_select_file(shoot, file, tags, work_ssd_dest, archive_hdd_dest)
 
@@ -252,7 +252,7 @@ def consolidate(
     typer.echo(f"Consolidating unique files from '{source}'...")
     
     app_config = config.load_config()
-    archive_hdd_dest = config.get_location(app_config, "archive_hdd")
+    archive_hdd_dest = config.get_location(app_config, "archive")
     
     actions.consolidate_files(
         source,
@@ -293,7 +293,7 @@ def backup(
         )
 
     app_config = config.load_config()
-    archive_hdd_dest = config.get_location(app_config, "archive_hdd")
+    archive_hdd_dest = config.get_location(app_config, "archive")
 
     actions.consolidate_files(
         source,
@@ -352,7 +352,7 @@ def list_backups_cmd(
     Useful for quickly seeing what has been consolidated, and how large each backup folder is.
     """
     app_config = config.load_config()
-    archive_hdd_dest = config.get_location(app_config, "archive_hdd")
+    archive_hdd_dest = config.get_location(app_config, "archive")
     actions.list_backups(archive_hdd_dest, subpath)
 
 
@@ -394,18 +394,37 @@ def copy_meta(
 
 
 
-LOCATION_KEYS = {"laptop", "work_ssd", "archive_hdd"}
-
 @app.command()
 def locations():
-    """Show configured v-flow paths and whether they are currently mounted."""
+    """Show storage roles and whether each configured location is available."""
     app_config = config.load_config()
     locs = app_config.get("locations", {})
     settings = app_config.get("settings", {})
-    typer.echo("Locations:")
-    for key, path in locs.items():
-        mounted = "✓" if Path(path).exists() else "✗ not mounted"
-        typer.echo(f"  {key}: {path}  [{mounted}]")
+
+    archive_path = config.resolve_location(app_config, "archive")
+    typer.echo("Storage roles:")
+    if archive_path:
+        typer.echo(f"  Archive: {archive_path} [{config.location_status(archive_path)}]")
+    else:
+        typer.echo("  Archive: not configured")
+
+    exports_path = config.resolve_location(app_config, "exports")
+    if exports_path:
+        typer.echo(f"  Exports: {exports_path} [{config.location_status(exports_path)}]")
+    else:
+        typer.echo("  Exports: not configured")
+
+    typer.echo("Working locations:")
+    working = locs.get("working", {})
+    if isinstance(working, dict) and working:
+        for name, path in working.items():
+            typer.echo(f"  {name}: {path} [{config.location_status(path)}]")
+    else:
+        for name in ("laptop", "work_ssd"):
+            path = config.resolve_location(app_config, name)
+            if path:
+                typer.echo(f"  {name}: {path} [{config.location_status(path)}]")
+
     if settings:
         typer.echo("Settings:")
         for key, val in settings.items():
@@ -414,28 +433,32 @@ def locations():
 
 @app.command("set")
 def set_config(
-    key: str = typer.Argument(help="Config key to update. Location keys: laptop, work_ssd, archive_hdd. Settings: settings.<key> (e.g. settings.default_split_gap)."),
+    key: str = typer.Argument(help="Config key: archive, exports, working.<name>, or settings.<name>."),
     value: str = typer.Argument(help="New value for the key."),
 ):
     """Update a single config value without re-running setup.
 
     Examples:
-      v-flow set archive_hdd "/Volumes/Kaung HDD/MediaArchive"
-      v-flow set laptop "/Users/me/Desktop/Ingest"
-      v-flow set settings.default_split_gap 24
+      v-flow set archive "/Volumes/Archive/Media"
+      v-flow set exports "/Volumes/Work/Exports"
+      v-flow set working.travel_ssd "/Volumes/Travel/Working Copies"
     """
     app_config = config.load_config()
 
-    if key in LOCATION_KEYS:
+    if key in {"archive", "exports"}:
         app_config.setdefault("locations", {})[key] = value
         typer.echo(f"Set locations.{key} = {value}")
+    elif key.startswith("working.") and key[len("working."):]:
+        working_name = key[len("working."):]
+        app_config.setdefault("locations", {}).setdefault("working", {})[working_name] = value
+        typer.echo(f"Set locations.working.{working_name} = {value}")
     elif key.startswith("settings."):
         setting_key = key[len("settings."):]
         app_config.setdefault("settings", {})[setting_key] = value
         typer.echo(f"Set settings.{setting_key} = {value}")
     else:
         typer.echo(
-            f"Unknown key '{key}'. Use one of: {', '.join(sorted(LOCATION_KEYS))}, or settings.<key>.",
+            f"Unknown key '{key}'. Use archive, exports, working.<name>, or settings.<name>.",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -457,11 +480,18 @@ def make_config():
             raise typer.Exit()
 
     sample_config = {
+        "version": config.CONFIG_VERSION,
         "locations": {
-            "laptop": "/path/to/your/laptop/ingest/folder",
-            "work_ssd": "/path/to/your/fast/ssd/projects",
-            "archive_hdd": "/path/to/your/archive/hdd",
-        }
+            "archive": "/path/to/your/archive",
+            "exports": "/path/to/your/exports",
+            "working": {
+                "laptop": "/path/to/your/laptop/working/copies",
+                "work_ssd": "/path/to/your/fast/working/drive",
+            },
+        },
+        "settings": {
+            "laptop_free_space_reserve_gb": config.DEFAULT_LAPTOP_FREE_SPACE_RESERVE_GB,
+        },
     }
     
     with open(config.CONFIG_PATH, "w") as f:

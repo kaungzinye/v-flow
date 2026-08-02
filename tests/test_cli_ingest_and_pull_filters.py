@@ -35,9 +35,11 @@ def test_ingest_with_files_range_filter(tmp_path, monkeypatch):
     tmp_config = tmp_path / "config.yml"
     tmp_config.write_text(
         f"locations:\n"
-        f"  laptop: \"{laptop_root}\"\n"
-        f"  work_ssd: \"{work_root}\"\n"
-        f"  archive_hdd: \"{archive_root}\"\n"
+        f"  archive: \"{archive_root}\"\n"
+        f"  exports: \"{tmp_path / 'exports'}\"\n"
+        f"  working:\n"
+        f"    laptop: \"{laptop_root}\"\n"
+        f"    work_ssd: \"{work_root}\"\n"
     )
     monkeypatch.setattr(vflow_config, "CONFIG_PATH", tmp_config)
 
@@ -86,9 +88,11 @@ def test_pull_with_mixed_patterns(tmp_path, monkeypatch):
     tmp_config = tmp_path / "config.yml"
     tmp_config.write_text(
         f"locations:\n"
-        f"  laptop: \"{tmp_path / 'laptop'}\"\n"
-        f"  work_ssd: \"{work_root}\"\n"
-        f"  archive_hdd: \"{archive_root}\"\n"
+        f"  archive: \"{archive_root}\"\n"
+        f"  exports: \"{tmp_path / 'exports'}\"\n"
+        f"  working:\n"
+        f"    laptop: \"{tmp_path / 'laptop'}\"\n"
+        f"    work_ssd: \"{work_root}\"\n"
     )
     monkeypatch.setattr(vflow_config, "CONFIG_PATH", tmp_config)
 
@@ -121,4 +125,3 @@ def test_pull_with_mixed_patterns(tmp_path, monkeypatch):
     assert "IMG_0001.MOV" not in pulled
     assert pulled[0] == "C3310.MP4"
     assert "C3319.MP4" in pulled
-

@@ -38,9 +38,11 @@ def test_ingest_report_classifies_missing_in_laptop_and_archive(tmp_path, monkey
     tmp_config = tmp_path / "config.yml"
     tmp_config.write_text(
         f"locations:\n"
-        f"  laptop: \"{laptop_root}\"\n"
-        f"  work_ssd: \"{tmp_path / 'work'}\"\n"
-        f"  archive_hdd: \"{archive_root}\"\n"
+        f"  archive: \"{archive_root}\"\n"
+        f"  exports: \"{tmp_path / 'exports'}\"\n"
+        f"  working:\n"
+        f"    laptop: \"{laptop_root}\"\n"
+        f"    work_ssd: \"{tmp_path / 'work'}\"\n"
     )
     monkeypatch.setattr(vflow_config, "CONFIG_PATH", tmp_config)
 
@@ -67,4 +69,3 @@ def test_ingest_report_classifies_missing_in_laptop_and_archive(tmp_path, monkey
     assert "On laptop only:" in result.output
     assert "On archive only:" in result.output
     assert "On neither (not ingested): 1" in result.output
-

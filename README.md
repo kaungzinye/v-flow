@@ -24,7 +24,7 @@
    v-flow make-config
    ```
 
-   Then edit `~/.vflow_config.yml` to point to your laptop ingest folder, work SSD, and archive drive.
+   Then edit `~/.vflow_config.yml` to point to your Archive, Exports, and named working locations.
 
    Alternatively, in Claude Code or Cursor you can say:
 
@@ -89,10 +89,11 @@ If you prefer manual setup instead of the installer, you can copy the folders fr
 
 ## Overview
 
-v-flow is designed around a professional media workflow that separates your storage into:
+v-flow reports storage by lifecycle role:
 
-- **Archive** (large HDD) - Long-term storage for all raw footage and final exports
-- **Workspace** (fast SSD) - Temporary workspace for active projects
+- **Archive** - Protected retained storage
+- **Exports** - One browsable root for retained rendered media
+- **Working locations** - Named laptop or work-drive locations for optional Working Copies
 
 This separation keeps your SSD clean and your media library organized.
 
@@ -136,9 +137,13 @@ Edit `~/.vflow_config.yml` and update the paths to match your setup:
 
 ```yaml
 locations:
-  laptop: "/path/to/your/laptop/ingest/folder"
-  work_ssd: "/path/to/your/fast/ssd/projects"
-  archive_hdd: "/path/to/your/archive/hdd"
+  archive: "/path/to/your/archive"
+  exports: "/path/to/your/exports"
+  working:
+    laptop: "/path/to/your/laptop/working/copies"
+    work_ssd: "/path/to/your/fast/working/drive"
+settings:
+  laptop_free_space_reserve_gb: 50
 ```
 
 **Important:** You must configure these paths before using v-flow commands.
@@ -404,7 +409,7 @@ v-flow backup --source "/Users/you/Desktop/Ingest" --destination "Video/RAW/Desk
 
 #### Behavior
 - Builds an index of existing archive files (by name and size) so it can skip duplicates that are already in the archive, even if they live in other folders.
-- Scans the source directory and copies only unique files into `archive_hdd/<destination>`.
+- Scans the source directory and copies only unique files into `Archive/<destination>`.
 - Creates log files (`copied_files.txt` and `skipped_duplicates.txt`) in the destination folder.
 - With `--delete-source`, tracks which files were actually copied and **after the copy completes** offers an interactive prompt to delete those source files.
 
@@ -481,8 +486,8 @@ v-flow list-backups --subpath "Video/RAW/Desktop_Ingest"
 | `--subpath, -p` | **(optional, default: `Video/RAW/Desktop_Ingest`)** Subpath under the archive root to scan for backup folders |
 
 #### Behavior
-- Uses the configured `archive_hdd` path from `~/.vflow_config.yml`.
-- Looks under `archive_hdd/<subpath>` for immediate subfolders (each treated as a backup set).
+- Uses the configured Archive path from `~/.vflow_config.yml`.
+- Looks under `Archive/<subpath>` for immediate subfolders (each treated as a backup set).
 - For each backup folder, prints:
   - Folder name
   - Number of files

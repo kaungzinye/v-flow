@@ -47,9 +47,11 @@ def test_backup_and_verify_archive_wide(tmp_path, monkeypatch):
     tmp_config = tmp_path / "config.yml"
     tmp_config.write_text(
         f"locations:\n"
-        f"  laptop: \"{ingest}\"\n"
-        f"  work_ssd: \"{tmp_path / 'work'}\"\n"
-        f"  archive_hdd: \"{archive_root}\"\n"
+        f"  archive: \"{archive_root}\"\n"
+        f"  exports: \"{tmp_path / 'exports'}\"\n"
+        f"  working:\n"
+        f"    laptop: \"{ingest}\"\n"
+        f"    work_ssd: \"{tmp_path / 'work'}\"\n"
     )
     monkeypatch.setattr(vflow_config, "CONFIG_PATH", tmp_config)
 
@@ -89,4 +91,3 @@ def test_backup_and_verify_archive_wide(tmp_path, monkeypatch):
 
     assert result_verify.exit_code == 0, result_verify.output
     assert "Backup verification PASSED" in result_verify.output
-

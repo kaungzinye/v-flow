@@ -37,9 +37,11 @@ def test_backup_includes_braw_and_mov(tmp_path, monkeypatch):
     tmp_config = tmp_path / "config.yml"
     tmp_config.write_text(
         f"locations:\n"
-        f"  laptop: \"{tmp_path / 'laptop'}\"\n"
-        f"  work_ssd: \"{tmp_path / 'work'}\"\n"
-        f"  archive_hdd: \"{archive_root}\"\n"
+        f"  archive: \"{archive_root}\"\n"
+        f"  exports: \"{tmp_path / 'exports'}\"\n"
+        f"  working:\n"
+        f"    laptop: \"{tmp_path / 'laptop'}\"\n"
+        f"    work_ssd: \"{tmp_path / 'work'}\"\n"
     )
     monkeypatch.setattr(vflow_config, "CONFIG_PATH", tmp_config)
 
@@ -68,4 +70,3 @@ def test_backup_includes_braw_and_mov(tmp_path, monkeypatch):
     # Phone naming patterns
     assert "IMG_1234.MOV" in files
     assert "VID_20260305_123456.MP4" in files
-

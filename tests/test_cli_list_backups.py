@@ -26,9 +26,11 @@ def test_list_backups_on_simple_tree(tmp_path, monkeypatch):
     tmp_config = tmp_path / "config.yml"
     tmp_config.write_text(
         f"locations:\n"
-        f"  laptop: \"{tmp_path / 'laptop'}\"\n"
-        f"  work_ssd: \"{tmp_path / 'work'}\"\n"
-        f"  archive_hdd: \"{archive_root}\"\n"
+        f"  archive: \"{archive_root}\"\n"
+        f"  exports: \"{tmp_path / 'exports'}\"\n"
+        f"  working:\n"
+        f"    laptop: \"{tmp_path / 'laptop'}\"\n"
+        f"    work_ssd: \"{tmp_path / 'work'}\"\n"
     )
     monkeypatch.setattr(vflow_config, "CONFIG_PATH", tmp_config)
 
@@ -45,4 +47,3 @@ def test_list_backups_on_simple_tree(tmp_path, monkeypatch):
     # Both backup folders should be mentioned
     assert "BackupA" in result.output
     assert "BackupB" in result.output
-
