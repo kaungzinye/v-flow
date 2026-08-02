@@ -73,6 +73,7 @@ If you prefer manual setup instead of the installer, you can copy the folders fr
 - [Setup](#setup)
 - [Workflow Commands](#workflow-commands)
   - [ingest](#v-flow-ingest)
+  - [checkout](#v-flow-checkout)
   - [prep](#v-flow-prep)
   - [pull](#v-flow-pull)
   - [create-select](#v-flow-create-select)
@@ -103,12 +104,12 @@ This separation keeps your SSD clean and your media library organized.
 
 The lifecycle of a project follows these steps:
 
-### 1. **Ingest** → Backup new footage
-Copy footage from SD card to both laptop and archive for immediate backup.
+### 1. **Ingest** → Preserve Camera Originals
+Copy one received card or source hierarchy into an immutable Archive Import Batch with a SHA-256 manifest.
 
-### 2. **Prep or Pull** → Move to workspace
-- **`prep`** - Move files from laptop ingest folder to work SSD (moves files)
-- **`pull`** - Copy files from archive to work SSD (keeps archive intact, perfect for older footage)
+### 2. **Checkout or Direct Archive Access** → Make media available for editing
+- **`checkout --working-location <name>`** - Create a checksum-verified Working Copy at the explicitly named location.
+- **`checkout --direct-archive-access`** - Report the archived Shoot path without creating a Working Copy.
 
 ### 3. **Edit & Grade** → Create content
 Work on your project and create reusable, graded clips.
@@ -158,7 +159,7 @@ These commands follow the standard v-flow workflow from ingest to archive.
 
 ### `v-flow ingest`
 
-Safely copies footage from an SD card to two separate locations (laptop and archive) for immediate backup. Supports automatic shoot naming by file date range and safety checks for duplicates.
+Preserves a card or source folder as an immutable Import Batch in the Archive. Ingest retains the received hierarchy and companion files, writes a checksum manifest, leaves the source untouched, and creates no Working Copy.
 
 #### Prerequisites
 - Configured `~/.vflow_config.yml` file
@@ -171,8 +172,8 @@ Safely copies footage from an SD card to two separate locations (laptop and arch
 | `--shoot, -n` | **(optional if `--auto`)** Shoot folder name, e.g., `2025-10-12_ShootName` or `2025-10-12_to_2025-10-15_ShootName` |
 | `--auto, -a` | Infer shoot name from date range of media files. If multiple days detected, uses a range |
 | `--force, -f` | Bypass date-range validation warnings when `--shoot` name doesn't match detected file dates |
-| `--skip-laptop` | Skip copying files to the laptop ingest folder (saves space) |
-| `--workspace, -w` | Also ingest directly to the Workspace SSD (creates project structure) |
+| `--import-batch` | Stable Import Batch identity; v-flow derives one from source content when omitted |
+| `--files` | Restrict ingest to specific filenames, patterns, or ranges |
 | `--split-by-gap` | Automatically split footage into multiple shoots if a time gap of X hours is detected (overrides config default) |
 
 #### Configuration
@@ -191,19 +192,43 @@ settings:
 v-flow ingest --source "/Volumes/SDCARD/private/M4ROOT/CLIP" --auto
 ```
 
-**Ingest directly to Workspace (skipping laptop) and split trips:**
+**Ingest with an explicit Import Batch identity:**
 ```bash
-v-flow ingest --source "/Volumes/SDCARD/private/M4ROOT/CLIP" --auto --skip-laptop --workspace --split-by-gap 24
+v-flow ingest --source "/Volumes/SDCARD" --shoot "2026-08-02_Stockholm" --import-batch "card-a"
 ```
 
 #### Behavior
-- Recursively finds common video formats (.mp4, .mov, .mxf, .mts, .avi, .m4v)
-- Derives date range from file creation/modification dates
-- **Smart Splitting:** If `--split-by-gap` is set (or configured), splits footage into separate shoots based on time gaps
-- **Storage Fallback:** If a destination drive is full, it skips that drive and continues to the Archive (ensuring backup)
-- **Cross-shoot duplicate check:** Skips any file (by name + size) already present anywhere in laptop ingest or archive, not just in the current shoot folder. So if the 28th was already ingested, ingesting 28th+29th will only copy new files from the 29th.
-- Detects existing shoots in laptop ingest and archive locations; copies only missing files
-- Creates target shoot folders if needed
+- Preserves every selected file beneath `Camera Originals/<Shoot>/<Import Batch>/contents`.
+- Records relative path, byte size, checksum algorithm, and SHA-256 checksum in `manifest.json`.
+- Reuses existing archived files only after checksum verification.
+- Stops on content conflicts and supports retrying an interrupted Import Batch.
+- Reports the Archive as the single retained v-flow copy; the source remains untouched.
+
+---
+
+### `v-flow checkout`
+
+Makes an archived Shoot available for editing either by creating a Working Copy at an explicitly named configured location or by reporting Direct Archive Access. Checkout never falls back to another device.
+
+| Flag | Description |
+|------|-------------|
+| `--shoot, -n` | **(required)** Archived Shoot identity |
+| `--working-location, -l` | Explicit name under `locations.working`, such as `work_ssd` or `laptop` |
+| `--direct-archive-access` | Use archived Camera Originals in place and create no Working Copy |
+| `--dry-run` | Verify manifests and preview paths, file counts, and required additional space without copying |
+
+Choose exactly one of `--working-location` and `--direct-archive-access`.
+
+```bash
+# Preview and create a Working Copy on the configured SSD
+v-flow checkout --shoot "2026-08-02_Stockholm" --working-location work_ssd --dry-run
+v-flow checkout --shoot "2026-08-02_Stockholm" --working-location work_ssd
+
+# Edit directly from the Archive
+v-flow checkout --shoot "2026-08-02_Stockholm" --direct-archive-access
+```
+
+Laptop Checkout reports required space, current free space, and the configured `laptop_free_space_reserve_gb`. It stops before copying when the Working Copy would violate that reserve. Repeated or interrupted Checkout reuses existing files only after checksum verification, while differing content stops the entire plan before any new files are copied.
 
 ---
 

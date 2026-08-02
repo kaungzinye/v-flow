@@ -3,6 +3,7 @@ import yaml
 from pathlib import Path
 from typing import Optional
 from . import config
+from .checkout_service import checkout_shoot, report_checkout
 
 app = typer.Typer()
 
@@ -49,6 +50,44 @@ def ingest(
         files_filter=files,
         import_batch_id=import_batch,
     )
+
+
+@app.command()
+def checkout(
+    shoot: str = typer.Option(..., "--shoot", "-n", help="Shoot identity to make available for editing."),
+    working_location: Optional[str] = typer.Option(
+        None,
+        "--working-location",
+        "-l",
+        help="Explicit named Working Location for the Working Copy.",
+    ),
+    direct_archive_access: bool = typer.Option(
+        False,
+        "--direct-archive-access",
+        help="Use the archived Camera Originals in place and create no Working Copy.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Verify and preview the Checkout without copying files.",
+    ),
+):
+    """Create a Working Copy, or report paths for Direct Archive Access."""
+    app_config = config.load_config()
+    archive_path = config.get_location(app_config, "archive")
+    try:
+        result = checkout_shoot(
+            app_config,
+            archive_path,
+            shoot,
+            working_location,
+            direct_archive_access,
+            dry_run,
+        )
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    report_checkout(result)
 
 @app.command("ingest-report")
 def ingest_report_cmd(
