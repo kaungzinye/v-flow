@@ -5,6 +5,8 @@ from typing import Optional
 from . import config
 from .checkout_service import checkout_shoot, report_checkout
 from .export_archive import archive_export, report_archive
+from .finish_service import finish_project, report_finish
+from .resolve_adapter import ResolveUnavailableError, get_resolve_adapter
 
 app = typer.Typer()
 
@@ -334,6 +336,39 @@ def archive(
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
     report_archive(result)
+
+
+@app.command()
+def finish(
+    project: str = typer.Option(
+        ...,
+        "--project",
+        "-p",
+        help="Project identity whose retained outputs and Project Backup must verify.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Verify retained outputs and preview the Project Backup export.",
+    ),
+):
+    """Finish a Project through Resolve without removing local files."""
+    app_config = config.load_config()
+    exports = config.get_location(app_config, "exports")
+    archive_path = config.get_location(app_config, "archive")
+    try:
+        adapter = None if dry_run else get_resolve_adapter()
+        result = finish_project(
+            exports,
+            archive_path,
+            project,
+            adapter,
+            dry_run=dry_run,
+        )
+    except (OSError, ResolveUnavailableError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    report_finish(result)
 
 @app.command()
 def create_select(
