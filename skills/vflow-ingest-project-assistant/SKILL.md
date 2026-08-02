@@ -12,13 +12,15 @@ compatibility: Requires local v-flow CLI, access to configured v-flow locations,
 
 ## Purpose and When to Use
 
-Help the user **ingest footage** from a card or folder and **prepare an editing project** on their workspace SSD.
+Help the user **ingest footage and photos from a card or folder**, **verify the backup before formatting**, and **prepare an editing project** on their workspace SSD.
 
 This skill translates natural-language requests like:
 
+- “What’s on my card?”
 - “Ingest yesterday’s card.”
-- “Import to laptop only.”
-- “Ingest and set up a project on my SSD.”
+- “Import photos from the card.”
+- “Verify before I format.”
+- “Set up a project on my SSD.”
 
 into concrete v-flow commands.
 
@@ -49,17 +51,35 @@ Then proceed. Do not ask the user to do this manually.
 
 ## Core Workflows
 
-Core commands:
+### Full card-offload workflow (recommended order)
 
-- `v-flow ingest` → calls `ingest_service.ingest_shoot` under the hood.
-- `v-flow prep` → calls `ingest_service.prep_shoot`.
+1. **See what’s on the card** — `v-flow card-report --source <card-root>`
+2. **Check which videos are new** — `v-flow ingest-report --source <card-clip-folder>`
+3. **Ingest new videos** — `v-flow ingest --source <card-clip-folder> ...`
+4. **Import new photos** — `v-flow photo-ingest --source <card-photo-folder> --shoot “<name>”`
+5. **Verify before formatting** — `v-flow card-verify --source <card-root> --photo-shoot “<name>”`
 
-Key options and their meanings:
+Only after card-verify PASSES is it safe to format the card.
 
-For ingest:
+---
 
-- `--source` / `-s` – **required**: folder where video files live.
-  - Typical SD card folder: `"/Volumes/CardName/private/M4ROOT/CLIP"` (Sony, etc.).
+### Commands and their options
+
+**`v-flow card-report`** — see what’s on the card before doing anything
+
+- `--source` / `-s` – **required**: card root (e.g. `/Volumes/Untitled`).
+- Auto-detects `private/M4ROOT/CLIP` for videos and `DCIM/100MSDCF` for photos.
+- Groups by date, shows first/last filename, count, and whether videos are already in archive.
+
+**`v-flow ingest-report`** — check which videos are new (not yet in laptop or archive)
+
+- `--source` / `-s` – **required**: card CLIP folder (e.g. `/Volumes/Untitled/private/M4ROOT/CLIP`).
+- `--priority-day` – highlight a specific day of month (default 28).
+- Compares against both laptop ingest and archive by name+size.
+
+**`v-flow ingest`** — ingest videos to laptop and archive
+
+- `--source` / `-s` – **required**: folder where video files live (e.g. `/Volumes/CardName/private/M4ROOT/CLIP`).
 - `--shoot` / `-n` – shoot name, used when **not** using `--auto`.
 - `--auto` / `-a` – infer shoot folder name from file dates.
 - `--force` / `-f` – override date-range mismatches when re-using an existing shoot name.
@@ -68,110 +88,87 @@ For ingest:
 - `--split-by-gap` – split footage into multiple shoots if there is a time gap of N hours.
 - `--files` – optional list of filename patterns/ranges (e.g. `C3317`, `C3317-C3351`) to restrict ingest.
 
-For prep:
+**`v-flow photo-ingest`** — copy RAW photos to Photo/RAW archive
 
-- `--shoot` / `-n` – name of the shoot to move from laptop ingest to workspace SSD.
+- `--source` / `-s` – **required**: folder with RAW files (e.g. `/Volumes/Untitled/DCIM/100MSDCF`).
+- `--shoot` / `-n` – **required**: shoot name in Photo/RAW (e.g. `”2026-05-06_to_2026-05-13 Rome”`).
+- Skips files already in that specific shoot folder (not archive-wide — avoids Sony filename-recycling false positives).
+- Preserves timestamps. Supports: ARW, CR2, CR3, NEF, DNG, ORF, RW2.
 
-High-level behavior:
+**`v-flow card-verify`** — verify card is fully backed up before formatting
 
-1. Interpret intent
+- `--source` / `-s` – **required**: card root (e.g. `/Volumes/Untitled`).
+- `--photo-shoot` – name of the photo shoot to verify against (required if card has photos).
+- Videos checked archive-wide (Video/RAW) by name+size.
+- Photos checked against specific shoot folder only (Photo/RAW/<photo-shoot>).
+- Reports PASS/FAIL separately for videos and photos with overall verdict.
 
-Map user phrases to ingest/prep behavior:
+**`v-flow prep`** — move shoot from laptop ingest to workspace SSD for editing
 
-- “Import/ingest to laptop” → `v-flow ingest` with:
-  - `--source` as provided or clarified.
-  - No `--workspace` flag (laptop + archive only).
-- “Ingest and set up a project”, “prep for editing”, “move to SSD” →
-  - Run `v-flow ingest` first (if footage is still on card).
-  - Then run `v-flow prep --shoot <name>` to move files from laptop ingest to `work_ssd`.
-- “Ingest directly to SSD as well” →
-  - Add `--workspace` to the ingest command.
+- `--shoot` / `-n` – **required**: name of the shoot to move from laptop ingest to workspace SSD.
 
-Always ask short, concrete questions before running ingest:
+---
 
-1. **Source path**
-   - Example: “Where are the camera files? (e.g. `/Volumes/Card/private/M4ROOT/CLIP`)"
-   - If user says just “from the card”, ask them to confirm the mount path.
+### High-level behavior
 
-2. **Shoot naming**
-   - If the user doesn’t specify:
-     - Ask: “Do you want me to **auto-name** the shoot based on dates, or use a specific name?”
-   - If they choose auto:
-     - Use `--auto` and omit `--shoot`.
-   - If they provide a name:
-     - Use `--shoot "<name>"` (no `--auto`).
+Map user phrases to commands:
 
-3. **Destinations: laptop vs workspace SSD**
-   - Ask: “Should I ingest to laptop only, or also ingest directly to your workspace SSD?”
-   - Map answers:
-     - “Laptop only” → no `--workspace`.
-     - “Also SSD” → add `--workspace`.
+- “What’s on my card?” / “Show me the card” → `v-flow card-report`.
+- “What’s new on the card?” / “What haven’t I ingested?” → `v-flow ingest-report`.
+- “Import/ingest videos to laptop” → `v-flow ingest` (laptop + archive, no `--workspace`).
+- “Import photos from card” / “Ingest photos” → `v-flow photo-ingest`.
+- “Verify the card” / “Can I format?” → `v-flow card-verify`.
+- “Ingest and set up a project” / “Move to SSD” → `v-flow ingest` then `v-flow prep`.
+- “Ingest directly to SSD as well” → add `--workspace` to `v-flow ingest`.
 
-4. **Splitting by time gap**
-   - If they mention multiple days or long gaps, or say “split into parts”:
-     - Ask: “Do you want me to auto-split this into separate shoots when there’s a gap of more than N hours? If so, how many hours?”
-     - Use `--split-by-gap N`. If they’re unsure, you can suggest using the default from config.
+Always ask short, concrete questions before running commands:
 
-5. **File filters (optional)**
-   - If they mention specific clip ranges:
-     - Example: “Only C3317 to C3351.”
-     - Use `--files "C3317-C3351"`.
+1. **Card/source path** — confirm the mount point (e.g. `/Volumes/Untitled`). For ingest/ingest-report, derive the CLIP folder automatically or ask.
+2. **Shoot naming** — for `ingest`: auto vs specific name. For `photo-ingest`: always ask for the shoot name.
+3. **Destinations** — for `ingest`: laptop only or also workspace SSD?
+4. **Splitting** — if multiple days or gaps, ask about `--split-by-gap`.
+5. **File filters** — if clip ranges mentioned, use `--files`.
 
-When you have all needed information:
+Show a brief summary before running any command and wait for user confirmation.
 
-- Construct the `v-flow ingest` command explicitly.
-- Echo a brief summary to the user before running, for example:
+After each command, show key results (files copied/skipped/errors, destination paths). Summarize errors clearly with next steps.
 
-> “I’ll ingest from `/Volumes/Card/private/M4ROOT/CLIP` to your laptop ingest and archive, auto-naming the shoot based on dates, and also ingest directly to your workspace SSD. OK?”
+---
 
-Only run the command after the user confirms.
+### Checklist
 
-If the user also asked to “set up a project”, then:
+Before running `ingest`:
+- [ ] Exact `--source` path known.
+- [ ] `--auto` or `--shoot` chosen.
+- [ ] `--workspace` decision made.
+- [ ] `--split-by-gap` set or left at default.
 
-- After successful ingest, run:
-  - `v-flow prep --shoot "<shoot-name>"`
-  - Here `<shoot-name>` is either:
-    - The name they provided with `--shoot`, or
-    - The auto-named shoot that ingest reported (if ingest output includes it), or
-    - A name you ask them to confirm if ambiguous.
+Before running `photo-ingest`:
+- [ ] Exact `--source` path known (photo folder on card).
+- [ ] `--shoot` name confirmed.
 
-After each command:
+Before running `card-verify`:
+- [ ] Card root (`--source`) confirmed.
+- [ ] `--photo-shoot` name confirmed if card has photos.
 
-- Show key high-level results, not every log line:
-  - Number of files ingested, skipped, or errored.
-  - Final shoot folder path(s) on laptop and/or workspace SSD.
-- If there were errors (e.g. disk full), summarize them clearly and suggest next steps.
+Before running `prep`:
+- [ ] Shoot name confirmed as it appears in laptop ingest.
+- [ ] User understands `prep` moves files (won’t remain in laptop ingest).
 
-Examples:
+### Examples
 
-- “Ingest my card.”
-  - Ask:
-    - “Which folder on the card has the video clips? (For Sony, this is usually the `CLIP` folder.)”
-    - “Do you want me to auto-name the shoot, or use a specific shoot name?”
-    - “Ingest to laptop only, or also to your workspace SSD?”
-
-- “Prep the Stockholm shoot.”
-  - Run `v-flow prep --shoot "Stockholm"` after confirming the exact name as it appears in the ingest folder.
-
-- “Import to laptop, don’t touch SSD.”
-  - Use `v-flow ingest` **without** `--workspace`.
-  - Do not run `prep` unless they explicitly ask for project setup.
-
-Before running ingest:
-
-- [ ] You know the exact `--source` path.
-- [ ] You know whether you’re using `--auto` or `--shoot`.
-- [ ] You know whether to include `--workspace`.
-- [ ] You’ve confirmed or reasonably set `--split-by-gap` (or left it at config default / zero).
-
-Before running prep:
-
-- [ ] The shoot name is confirmed with the user.
-- [ ] You understand that prep moves files from laptop ingest to workspace SSD (i.e. they won’t remain in laptop ingest).
+- "What's on my card?" → `v-flow card-report --source /Volumes/Untitled`
+- "Ingest my card." → ask for card path, shoot naming, destination; run `v-flow ingest-report` first, then `v-flow ingest`.
+- "Import the photos from Rome." → `v-flow photo-ingest --source /Volumes/Untitled/DCIM/100MSDCF --shoot "2026-05-06_to_2026-05-13 Rome"`
+- "Can I format the card?" → `v-flow card-verify --source /Volumes/Untitled --photo-shoot "2026-05-06_to_2026-05-13 Rome"`
+- "Prep the Stockholm shoot." → `v-flow prep --shoot "Stockholm"` after confirming name in laptop ingest.
+- "Import to laptop, don't touch SSD." → `v-flow ingest` without `--workspace`; no `prep` unless asked.
 
 ## Troubleshooting
 
 - **Ingest fails due to config**: Use the setup assistant to fix `~/.vflow_config.yml`, then retry `v-flow ingest`.
-- **Card path wrong**: Ask the user to confirm the mounted card path and re-run ingest with the corrected `--source`.
+- **Card path wrong**: Ask the user to confirm the mounted card path and re-run with the corrected `--source`.
 - **Not enough disk space**: Summarize required vs available space (from CLI output) and suggest ingesting to the drive with more space or freeing space first.
+- **card-verify FAIL**: Do not format. Check which files are missing, ingest/photo-ingest them, then re-run card-verify.
+- **photo-ingest skipping unexpectedly**: Confirms files are already in that shoot folder — not a false positive from another shoot.
 

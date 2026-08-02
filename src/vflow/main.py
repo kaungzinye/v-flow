@@ -63,6 +63,57 @@ def ingest_report_cmd(
     laptop_dest = config.get_location(app_config, "laptop")
     actions.ingest_report(source, archive_dest, laptop_path=laptop_dest, priority_day=priority_day, priority_month=priority_month)
 
+@app.command("photo-ingest")
+def photo_ingest_cmd(
+    source: str = typer.Option(..., "--source", "-s", help="Folder containing RAW photo files (e.g., '/Volumes/Untitled/DCIM/100MSDCF')."),
+    shoot: str = typer.Option(..., "--shoot", "-n", help="Name of the shoot folder to create/add to in Photo/RAW (e.g., 'Iceland Trip')."),
+):
+    """
+    Copies new RAW photos from a card or folder into the photo archive.
+
+    Files are compared against the specific shoot folder only (not archive-wide) to
+    avoid Sony filename-recycling false positives. Timestamps are preserved.
+    Supported formats: ARW, CR2, CR3, NEF, DNG, ORF, RW2.
+    """
+    app_config = config.load_config()
+    archive_dest = config.get_location(app_config, "archive")
+    actions.photo_ingest(source, shoot, archive_dest)
+
+
+@app.command("card-report")
+def card_report_cmd(
+    source: str = typer.Option(..., "--source", "-s", help="Card root directory (e.g., '/Volumes/Untitled')."),
+):
+    """
+    Shows what's on a card, grouped by date.
+
+    Auto-detects the video folder (private/M4ROOT/CLIP) and photo folder (DCIM/100MSDCF).
+    For each section, shows date, first/last filename, count, and whether video files
+    are already in the archive.
+    """
+    app_config = config.load_config()
+    archive_dest = config.get_location(app_config, "archive")
+    actions.card_report(source, archive_dest)
+
+
+@app.command("card-verify")
+def card_verify_cmd(
+    source: str = typer.Option(..., "--source", "-s", help="Card root directory (e.g., '/Volumes/Untitled')."),
+    photo_shoot: Optional[str] = typer.Option(None, "--photo-shoot", help="Name of the photo shoot in Photo/RAW to verify photos against (required if card has photos)."),
+):
+    """
+    Verifies card contents are safely in the archive before formatting.
+
+    Videos are checked archive-wide (Video/RAW) by name+size.
+    Photos are checked against a specific shoot folder only (Photo/RAW/<photo-shoot>),
+    avoiding Sony filename-recycling false positives across shoots.
+    Reports PASS or FAIL separately for videos and photos.
+    """
+    app_config = config.load_config()
+    archive_dest = config.get_location(app_config, "archive")
+    actions.card_verify(source, archive_dest, photo_shoot=photo_shoot)
+
+
 @app.command("list-duplicates")
 def list_duplicates_cmd(
     location: str = typer.Option("archive", "--location", "-l", help="Where to scan: 'archive', 'laptop', or 'both'"),

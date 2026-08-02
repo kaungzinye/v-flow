@@ -12,6 +12,8 @@ main.py and tests import ``actions.*``; the real implementations live in:
 from .ingest_service import (  # noqa: F401
     ingest_report,
     ingest_shoot,
+    photo_ingest,
+    card_report,
     prep_shoot,
     pull_shoot,
 )
@@ -25,6 +27,7 @@ from .delivery_service import (  # noqa: F401
 from .backup_service import (  # noqa: F401
     consolidate_files,
     verify_backup,
+    card_verify,
     list_backups,
     restore_folder,
     list_duplicates,

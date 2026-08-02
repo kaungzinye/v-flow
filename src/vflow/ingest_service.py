@@ -592,6 +592,200 @@ def ingest_shoot(
     typer.echo(f"{'=' * 70}\n")
 
 
+def photo_ingest(
+    source_dir: str,
+    shoot_name: str,
+    archive_path: Path,
+) -> None:
+    """
+    Copies new RAW photo files from source_dir to archive_path/Photo/RAW/<shoot_name>.
+    Skips files that already exist in that specific shoot folder by name+size.
+    Preserves timestamps using shutil.copy2.
+    """
+    source_path = Path(source_dir)
+    if not source_path.exists() or not source_path.is_dir():
+        typer.echo(f"Source directory not found: {source_path}", err=True)
+        raise typer.Exit(code=1)
+
+    photo_extensions = {".arw", ".cr2", ".cr3", ".nef", ".dng", ".orf", ".rw2"}
+
+    all_files: list[Path] = []
+    for file_path in source_path.rglob("*"):
+        if file_path.is_file() and file_path.suffix.lower() in photo_extensions:
+            all_files.append(file_path)
+
+    if not all_files:
+        typer.echo("No RAW photo files found in source directory.", err=True)
+        return
+
+    shoot_dir = archive_path / "Photo" / "RAW" / shoot_name
+    try:
+        shoot_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        typer.echo(f"Could not create shoot directory: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    # Build index of files already in this specific shoot folder only (not archive-wide)
+    shoot_index: set[tuple[str, int]] = set()
+    for f in shoot_dir.iterdir():
+        if f.is_file() and f.suffix.lower() in photo_extensions:
+            try:
+                shoot_index.add((f.name, f.stat().st_size))
+            except (OSError, FileNotFoundError):
+                pass
+
+    typer.echo(f"\nSource: {source_path}")
+    typer.echo(f"Destination: {shoot_dir}")
+    typer.echo(f"Found: {len(all_files)} RAW file(s) on card")
+    typer.echo(f"Already in shoot folder: {len(shoot_index)} file(s)")
+
+    copied_count = 0
+    skipped_count = 0
+    error_count = 0
+
+    with typer.progressbar(all_files, label=f"Photo ingest {shoot_name}") as progress:
+        for file_path in progress:
+            try:
+                size = file_path.stat().st_size
+            except (OSError, FileNotFoundError):
+                error_count += 1
+                continue
+
+            key = (file_path.name, size)
+            if key in shoot_index:
+                skipped_count += 1
+                continue
+
+            dest_file = shoot_dir / file_path.name
+            try:
+                shutil.copy2(str(file_path), str(dest_file))
+                shoot_index.add(key)
+                copied_count += 1
+            except Exception as e:
+                typer.echo(f"\n[ERROR] Could not copy {file_path.name}: {e}", err=True)
+                error_count += 1
+
+    typer.echo(f"\n{'=' * 70}")
+    typer.echo("PHOTO INGEST COMPLETE")
+    typer.echo(f"{'=' * 70}")
+    typer.echo(f"Copied:  {copied_count}")
+    typer.echo(f"Skipped: {skipped_count} (already exist in shoot folder)")
+    typer.echo(f"Errors:  {error_count}")
+    typer.echo(f"{'=' * 70}\n")
+
+
+def card_report(
+    source_dir: str,
+    archive_path: Path,
+) -> None:
+    """
+    Reports what's on a card. Auto-detects video (private/M4ROOT/CLIP) and photo
+    (DCIM/100MSDCF) folders, groups files by date, and shows first/last filename,
+    count, and whether videos are already in the archive.
+    """
+    source_path = Path(source_dir)
+    if not source_path.exists() or not source_path.is_dir():
+        typer.echo(f"Source directory not found: {source_path}", err=True)
+        raise typer.Exit(code=1)
+
+    video_folder = source_path / "private" / "M4ROOT" / "CLIP"
+    photo_folder = source_path / "DCIM" / "100MSDCF"
+
+    video_extensions = {".mp4", ".mov", ".mxf", ".mts", ".avi", ".m4v", ".braw", ".r3d", ".crm"}
+    photo_extensions = {".arw", ".cr2", ".cr3", ".nef", ".dng", ".orf", ".rw2"}
+
+    typer.echo("\n" + "=" * 70)
+    typer.echo("CARD REPORT")
+    typer.echo("=" * 70)
+    typer.echo(f"Card: {source_path}")
+
+    # Build archive-wide video index for presence check
+    archive_video_raw = archive_path / "Video" / "RAW"
+    archive_video_index: set[tuple[str, int]] = set()
+    if archive_video_raw.exists():
+        for f in archive_video_raw.rglob("*"):
+            if f.is_file() and f.suffix.lower() in video_extensions:
+                try:
+                    archive_video_index.add((f.name, f.stat().st_size))
+                except (OSError, FileNotFoundError):
+                    pass
+
+    from collections import defaultdict
+
+    # VIDEO SECTION
+    if video_folder.exists() and video_folder.is_dir():
+        video_files: list[Path] = []
+        for f in video_folder.rglob("*"):
+            if f.is_file() and f.suffix.lower() in video_extensions:
+                video_files.append(f)
+
+        typer.echo(f"\nVIDEOS  ({video_folder})")
+        typer.echo("-" * 70)
+
+        if not video_files:
+            typer.echo("  No video files found.")
+        else:
+            by_date: dict = defaultdict(list)
+            for f in video_files:
+                try:
+                    d = _get_media_date(f).date()
+                    by_date[d].append(f)
+                except Exception:
+                    continue
+
+            for d in sorted(by_date.keys()):
+                day_files = sorted(by_date[d], key=lambda f: f.name)
+                count = len(day_files)
+                first = day_files[0].name
+                last = day_files[-1].name
+                on_archive = sum(
+                    1 for f in day_files
+                    if (f.name, f.stat().st_size) in archive_video_index
+                )
+                hdd_label = f"{on_archive}/{count} on HDD" if on_archive > 0 else "NOT on HDD"
+                if first == last:
+                    typer.echo(f"  {d}  {count} file(s)  [{first}]  {hdd_label}")
+                else:
+                    typer.echo(f"  {d}  {count} file(s)  [{first} .. {last}]  {hdd_label}")
+    else:
+        typer.echo(f"\nVIDEOS  — folder not found ({video_folder})")
+
+    # PHOTO SECTION
+    if photo_folder.exists() and photo_folder.is_dir():
+        photo_files: list[Path] = []
+        for f in photo_folder.rglob("*"):
+            if f.is_file() and f.suffix.lower() in photo_extensions:
+                photo_files.append(f)
+
+        typer.echo(f"\nPHOTOS  ({photo_folder})")
+        typer.echo("-" * 70)
+
+        if not photo_files:
+            typer.echo("  No RAW photo files found.")
+        else:
+            by_date_p: dict = defaultdict(list)
+            for f in photo_files:
+                try:
+                    d = _get_media_date(f).date()
+                    by_date_p[d].append(f)
+                except Exception:
+                    continue
+
+            for d in sorted(by_date_p.keys()):
+                day_files = sorted(by_date_p[d], key=lambda f: f.name)
+                count = len(day_files)
+                first = day_files[0].name
+                last = day_files[-1].name
+                if first == last:
+                    typer.echo(f"  {d}  {count} file(s)  [{first}]")
+                else:
+                    typer.echo(f"  {d}  {count} file(s)  [{first} .. {last}]")
+    else:
+        typer.echo(f"\nPHOTOS  — folder not found ({photo_folder})")
+
+    typer.echo("\n" + "=" * 70 + "\n")
+
+
 def prep_shoot(shoot_name: str, laptop_ingest_path: Path, work_ssd_path: Path) -> None:
     """
     Moves a shoot from the ingest area to the working SSD and creates the project structure.
