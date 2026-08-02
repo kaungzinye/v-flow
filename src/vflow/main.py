@@ -10,21 +10,22 @@ from . import actions
 
 @app.command()
 def ingest(
-    source: str = typer.Option(..., "--source", "-s", help="Exact folder path where videos are located (e.g., '/Volumes/Kaung 128GB/private/M4ROOT/CLIP')"),
+    source: str = typer.Option(..., "--source", "-s", help="Camera card or source folder to preserve as received."),
     shoot: str = typer.Option(None, "--shoot", "-n", help="Name of the shoot (e.g., '2025-09-15_Stockholm_Broll'). Optional if --auto is used."),
+    import_batch: str = typer.Option(None, "--import-batch", help="Stable Import Batch identity. By default, v-flow derives one from the source hierarchy and content."),
     auto: bool = typer.Option(False, "--auto", "-a", help="Automatically infer shoot folder name from file dates. Creates date range if spanning multiple days."),
-    force: bool = typer.Option(False, "--force", "-f", help="Force ingest even if shoot name conflicts with existing date ranges."),
-    skip_laptop: bool = typer.Option(False, "--skip-laptop", help="Skip copying files to the laptop ingest folder (saves space)."),
-    workspace: bool = typer.Option(False, "--workspace", "-w", help="Also ingest directly to the Workspace SSD."),
-    split_by_gap: int = typer.Option(0, "--split-by-gap", help="Automatically split footage into multiple shoots if a time gap of X hours is detected."),
+    force: bool = typer.Option(False, "--force", "-f", help="Accepted for legacy scripts; immutable batches never overwrite conflicts."),
+    skip_laptop: bool = typer.Option(False, "--skip-laptop", help="Accepted for legacy scripts; ingest never creates a Working Copy."),
+    workspace: bool = typer.Option(False, "--workspace", "-w", help="Unsupported for ingest; create a Working Copy with Checkout."),
+    split_by_gap: int = typer.Option(0, "--split-by-gap", help="Unsupported for immutable Import Batches, which preserve one received source hierarchy."),
     files: list[str] = typer.Option(None, "--files", help="Optional: Specific filenames, patterns, or ranges to ingest (e.g., 'C3317' or 'C3317-C3351'). Can specify multiple times. If omitted, ingests all files."),
 ):
     """
-    Ingests footage from a source to the laptop and archive.
-    
-    The source should be the exact folder path where your video files are located
-    (e.g., '/Volumes/Kaung 128GB/private/M4ROOT/CLIP' for Sony cameras).
-    Videos will be searched recursively from this folder.
+    Archives a camera card or source folder as an immutable Import Batch.
+
+    The received hierarchy and companion files remain intact. A SHA-256 manifest
+    proves every archived file. Ingest leaves the source untouched and does not
+    create a Working Copy.
     """
     if not auto and not shoot:
         typer.echo("Either --shoot or --auto must be provided.", err=True)
@@ -33,19 +34,21 @@ def ingest(
     # Load configuration
     app_config = config.load_config()
     
-    # Get locations
-    laptop_dest = config.get_location(app_config, "laptop")
+    # Ingest depends only on protected Archive storage.
     archive_dest = config.get_location(app_config, "archive")
-    
-    workspace_dest = None
-    if workspace:
-        workspace_dest = config.get_location(app_config, "work_ssd")
         
-    # Check for default split gap if not provided via flag
-    if split_by_gap == 0:
-        split_by_gap = config.get_setting(app_config, "default_split_gap", 0)
-    
-    actions.ingest_shoot(source, shoot, laptop_dest, archive_dest, auto=auto, force=force, skip_laptop=skip_laptop, workspace_dest=workspace_dest, split_threshold=split_by_gap, files_filter=files)
+    actions.ingest_shoot(
+        source,
+        shoot,
+        archive_dest,
+        auto=auto,
+        force=force,
+        skip_laptop=skip_laptop,
+        workspace=workspace,
+        split_threshold=split_by_gap,
+        files_filter=files,
+        import_batch_id=import_batch,
+    )
 
 @app.command("ingest-report")
 def ingest_report_cmd(

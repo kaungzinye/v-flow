@@ -10,10 +10,10 @@ import typer
 from .core.date_utils import (
     parse_shoot_date_range,
     format_shoot_name,
-    cluster_files_by_date,
 )
-from .core.fs_ops import copy_and_verify, _build_destination_index, _is_duplicate
+from .core.fs_ops import copy_and_verify
 from .core.patterns import _extract_number_from_filename, _matches_pattern
+from .import_batch import ingest_import_batch
 
 
 def _get_media_date(file_path: Path) -> datetime:
@@ -248,348 +248,83 @@ def ingest_report(
 def ingest_shoot(
     source_dir: str,
     shoot_name: str,
-    laptop_dest: Path,
     archive_dest: Path,
     auto: bool = False,
     force: bool = False,
     skip_laptop: bool = False,
-    workspace_dest: Optional[Path] = None,
+    workspace: bool = False,
     split_threshold: int = 0,
     files_filter: Optional[list[str]] = None,
+    import_batch_id: Optional[str] = None,
 ) -> None:
-    """
-    The core logic for the ingest command with date-aware duplicate detection.
-    Supports splitting by time gap, skipping laptop backup, and ingesting to workspace.
-    """
+    """Archive a source hierarchy as one immutable, checksum-verified Import Batch."""
+    del force, skip_laptop
+
     source_path = Path(source_dir)
     if not source_path.exists() or not source_path.is_dir():
         typer.echo(f"Source directory not found: {source_path}", err=True)
         raise typer.Exit(code=1)
 
-    video_extensions = {
-        ".mp4",
-        ".mov",
-        ".mxf",
-        ".mts",
-        ".avi",
-        ".m4v",
-        ".braw",
-        ".r3d",
-        ".crm",
-    }
-    all_files: list[Path] = []
-    for file_path in source_path.rglob("*"):
-        if file_path.is_file() and file_path.suffix.lower() in video_extensions:
-            all_files.append(file_path)
-
-    if not all_files:
-        typer.echo("No video files found in the source directory.", err=True)
-        return
-
-    if files_filter:
-        files_to_ingest: list[Path] = []
-        for pattern in files_filter:
-            matching = [f for f in all_files if _matches_pattern(pattern, f.name)]
-            files_to_ingest.extend(matching)
-        files_to_ingest = list(dict.fromkeys(files_to_ingest))
-
-        if not files_to_ingest:
-            typer.echo(
-                f"⚠ No files found matching filter: {', '.join(files_filter)}", err=True
-            )
-            typer.echo(f"   Searched {len(all_files)} file(s) in: {source_path}")
-            if len(all_files) <= 10:
-                typer.echo(
-                    f"   Available files: {', '.join([f.name for f in all_files[:10]])}"
-                )
-            else:
-                typer.echo(
-                    f"   Sample files: {', '.join([f.name for f in all_files[:5]])}..."
-                )
-            raise typer.Exit(code=1)
-
+    if workspace:
         typer.echo(
-            f"\nFound {len(files_to_ingest)} file(s) matching filter (out of {len(all_files)} total)."
+            "Ingest writes only to the Archive. Create a Working Copy with Checkout.",
+            err=True,
         )
-    else:
-        files_to_ingest = all_files
-    typer.echo(f"\nFound {len(files_to_ingest)} video file(s) to ingest.")
+        raise typer.Exit(code=1)
 
-    files_with_dates = [(f, _get_media_date(f)) for f in files_to_ingest]
-
-    clusters: list[list[Path]] = []
-    if split_threshold > 0:
-        clusters = cluster_files_by_date(files_with_dates, split_threshold)
-        if len(clusters) > 1:
-            typer.echo(
-                f"✓ Splitting footage into {len(clusters)} shoots (gap > {split_threshold}h)."
+    all_source_files = [path for path in source_path.rglob("*") if path.is_file()]
+    selected_files: Optional[list[Path]] = None
+    if files_filter:
+        selected_files = []
+        for pattern in files_filter:
+            selected_files.extend(
+                path for path in all_source_files if _matches_pattern(pattern, path.name)
             )
-    else:
-        clusters = [[f for f, _ in files_with_dates]]
-
-    archive_raw_root = archive_dest / "Video" / "RAW"
-    laptop_index = _build_destination_index(laptop_dest)
-    archive_index = _build_destination_index(archive_raw_root)
-    typer.echo(
-        f"Laptop ingest index: {len(laptop_index)} file(s). Archive index: {len(archive_index)} file(s)."
-    )
-
-    for i, cluster_files in enumerate(clusters):
-        if len(clusters) > 1:
+        selected_files = list(dict.fromkeys(selected_files))
+        if not selected_files:
             typer.echo(
-                f"\n{'=' * 30} PART {i + 1}/{len(clusters)} {'=' * 30}"
-            )
-
-        cluster_dates = [_get_media_date(f) for f in cluster_files]
-        min_dt = min(cluster_dates)
-        max_dt = max(cluster_dates)
-        min_date = min_dt.date()
-        max_date = max_dt.date()
-
-        typer.echo(f"Date range: {min_date} to {max_date}")
-        typer.echo(f"Files in this shoot: {len(cluster_files)}")
-
-        existing_shoots = _find_existing_shoots(laptop_dest, archive_dest)
-        target_shoot_name: Optional[str] = None
-
-        if auto:
-            base_name = format_shoot_name(min_date, max_date, "Ingest")
-            if len(clusters) > 1:
-                target_shoot_name = f"{base_name}_Part{i+1}"
-            else:
-                file_date_range = (min_date, max_date)
-                matching_shoot = _find_matching_shoot(file_date_range, existing_shoots)
-
-                if matching_shoot:
-                    target_shoot_name = matching_shoot
-                    typer.echo(f"\n✓ Using existing shoot: {target_shoot_name}")
-                else:
-                    target_shoot_name = base_name
-                    typer.echo(f"\n✓ Creating new shoot: {target_shoot_name}")
-        else:
-            if not shoot_name:
-                typer.echo(
-                    "Shoot name is required when --auto is not used.", err=True
-                )
-                raise typer.Exit(code=1)
-
-            if len(clusters) > 1:
-                target_shoot_name = f"{shoot_name}_Part{i+1}"
-            else:
-                target_shoot_name = shoot_name
-
-            if len(clusters) == 1:
-                if target_shoot_name in existing_shoots:
-                    shoot_info = existing_shoots[target_shoot_name]
-                    shoot_start, shoot_end = shoot_info["date_range"]
-                    if not (shoot_start <= min_date and max_date <= shoot_end):
-                        typer.echo(
-                            f"\n⚠ WARNING: Shoot '{target_shoot_name}' exists with date range {shoot_start} to {shoot_end}",
-                            err=True,
-                        )
-                        typer.echo(
-                            f"   But files have date range {min_date} to {max_date}",
-                            err=True,
-                        )
-                        if not force:
-                            typer.echo(
-                                "   Use --force to proceed anyway.", err=True
-                            )
-                            raise typer.Exit(code=1)
-
-        shoot_exists_info = existing_shoots.get(
-            target_shoot_name,
-            {
-                "in_laptop": False,
-                "in_archive": False,
-            },
-        )
-
-        shoot_in_laptop = shoot_exists_info.get("in_laptop", False)
-        shoot_in_archive = shoot_exists_info.get("in_archive", False)
-
-        laptop_shoot_dir = laptop_dest / target_shoot_name
-        archive_shoot_dir = archive_dest / "Video" / "RAW" / target_shoot_name
-        workspace_shoot_dir = None
-        if workspace_dest:
-            workspace_shoot_dir = workspace_dest / target_shoot_name / "01_Source"
-
-        copy_to_laptop = not skip_laptop
-        copy_to_archive = True
-        copy_to_workspace = workspace_dest is not None
-
-        if skip_laptop:
-            typer.echo("   Skipping laptop ingest as requested.")
-
-        if shoot_in_archive and not shoot_in_laptop and copy_to_laptop:
-            typer.echo(
-                f"\n✓ Shoot '{target_shoot_name}' exists in archive but not in ingest.",
+                f"No files found matching filter: {', '.join(files_filter)}",
                 err=True,
             )
-            typer.echo(
-                "   Will ingest to laptop only (skipping archive copy since it's already archived)."
-            )
-            copy_to_archive = False
+            raise typer.Exit(code=1)
 
-        if copy_to_laptop:
-            try:
-                if not laptop_shoot_dir.exists():
-                    laptop_shoot_dir.mkdir(parents=True, exist_ok=True)
-            except OSError as e:
-                if e.errno == 28:
-                    typer.echo(
-                        "  [WARNING] Laptop storage full. Skipping copy to laptop.",
-                        err=True,
-                    )
-                    copy_to_laptop = False
-                else:
-                    typer.echo(f"Could not create laptop directory: {e}", err=True)
-                    raise typer.Exit(code=1)
+    files_for_identity = selected_files if selected_files is not None else all_source_files
+    if not files_for_identity:
+        typer.echo("No files found in the source directory.", err=True)
+        raise typer.Exit(code=1)
 
-        if copy_to_archive:
-            try:
-                if not archive_shoot_dir.exists():
-                    archive_shoot_dir.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                typer.echo(f"Could not create archive directory: {e}", err=True)
-                raise typer.Exit(code=1)
-
-        if copy_to_workspace:
-            try:
-                if not workspace_shoot_dir.exists():
-                    workspace_shoot_dir.mkdir(parents=True, exist_ok=True)
-                (workspace_dest / target_shoot_name / "02_Resolve").mkdir(
-                    exist_ok=True
-                )
-                (workspace_dest / target_shoot_name / "03_Exports").mkdir(
-                    exist_ok=True
-                )
-                (workspace_dest / target_shoot_name / "04_FinalRenders").mkdir(
-                    exist_ok=True
-                )
-                (workspace_dest / target_shoot_name / "05_Graded_Selects").mkdir(
-                    exist_ok=True
-                )
-            except OSError as e:
-                if e.errno == 28:
-                    typer.echo(
-                        "  [WARNING] Workspace storage full. Skipping copy to workspace.",
-                        err=True,
-                    )
-                    copy_to_workspace = False
-                else:
-                    typer.echo(
-                        f"Could not create workspace directories: {e}", err=True
-                    )
-                    raise typer.Exit(code=1)
-
-        copied_count = 0
-        skipped_count = 0
-        error_count = 0
-
-        with typer.progressbar(
-            cluster_files, label=f"Ingesting {target_shoot_name}"
-        ) as progress:
-            for file_path in progress:
-                try:
-                    file_key = (file_path.name, file_path.stat().st_size)
-                except OSError:
-                    file_key = (file_path.name, 0)
-
-                laptop_dup = (file_key in laptop_index) if copy_to_laptop else False
-                archive_dup = (file_key in archive_index) if copy_to_archive else False
-                workspace_dup = (
-                    _is_duplicate(file_path, workspace_shoot_dir)
-                    if copy_to_workspace
-                    else False
-                )
-
-                all_dups = True
-                if copy_to_laptop and not laptop_dup:
-                    all_dups = False
-                if copy_to_archive and not archive_dup:
-                    all_dups = False
-                if copy_to_workspace and not workspace_dup:
-                    all_dups = False
-
-                if all_dups:
-                    skipped_count += 1
-                    continue
-
-                file_copied = False
-
-                if copy_to_laptop and not laptop_dup:
-                    try:
-                        typer.echo(f"  -> Laptop: {laptop_shoot_dir}")
-                        if copy_and_verify(file_path, laptop_shoot_dir):
-                            file_copied = True
-                            laptop_index.add(file_key)
-                        else:
-                            error_count += 1
-                    except OSError as e:
-                        if e.errno == 28:
-                            typer.echo(
-                                "  [WARNING] Laptop storage full. Skipping copy to laptop.",
-                                err=True,
-                            )
-                            copy_to_laptop = False
-                        else:
-                            typer.echo(
-                                f"  [ERROR] Copy to laptop failed: {e}", err=True
-                            )
-                            error_count += 1
-
-                if copy_to_archive and not archive_dup:
-                    try:
-                        typer.echo(f"  -> Archive: {archive_shoot_dir}")
-                        if copy_and_verify(file_path, archive_shoot_dir):
-                            file_copied = True
-                            archive_index.add(file_key)
-                        else:
-                            error_count += 1
-                    except OSError as e:
-                        if e.errno == 28:
-                            typer.echo(
-                                f"  [CRITICAL] Archive storage full. Cannot backup {file_path.name}!",
-                                err=True,
-                            )
-                            error_count += 1
-                        else:
-                            typer.echo(
-                                f"  [ERROR] Copy to archive failed: {e}", err=True
-                            )
-                            error_count += 1
-
-                if copy_to_workspace and not workspace_dup:
-                    try:
-                        typer.echo(f"  -> Workspace: {workspace_shoot_dir}")
-                        if copy_and_verify(file_path, workspace_shoot_dir):
-                            file_copied = True
-                        else:
-                            error_count += 1
-                    except OSError as e:
-                        if e.errno == 28:
-                            typer.echo(
-                                "  [WARNING] Workspace storage full. Skipping copy to workspace.",
-                                err=True,
-                            )
-                            copy_to_workspace = False
-                        else:
-                            typer.echo(
-                                f"  [ERROR] Copy to workspace failed: {e}", err=True
-                            )
-                            error_count += 1
-
-                if file_copied:
-                    copied_count += 1
-
+    if split_threshold:
         typer.echo(
-            f"Finished {target_shoot_name}: {copied_count} copied, {skipped_count} skipped, {error_count} errors."
+            "Import Batches preserve one received source hierarchy; --split-by-gap is not supported.",
+            err=True,
         )
+        raise typer.Exit(code=1)
 
-    typer.echo(f"\n{'=' * 70}")
-    typer.echo("ALL INGEST TASKS COMPLETE")
-    typer.echo(f"{'=' * 70}\n")
+    target_shoot_name = shoot_name
+    if auto:
+        dates = [_get_media_date(path) for path in files_for_identity]
+        target_shoot_name = format_shoot_name(
+            min(dates).date(), max(dates).date(), "Ingest"
+        )
+    if not target_shoot_name:
+        typer.echo("Shoot name is required when --auto is not used.", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Archiving source hierarchy as Shoot '{target_shoot_name}'...")
+    result = ingest_import_batch(
+        source=source_path,
+        archive=archive_dest,
+        shoot_id=target_shoot_name,
+        import_batch_id=import_batch_id,
+        selected_files=selected_files,
+    )
+    typer.echo(
+        f"Import Batch '{result['import_batch_id']}': "
+        f"{result['copied']} copied, {result['skipped']} already verified, "
+        f"{result['files']} total."
+    )
+    typer.echo(f"Manifest: {result['manifest_path']}")
+    typer.echo("Retained copies: 1 (Archive only). The source remains untouched.")
 
 
 def photo_ingest(
@@ -1123,4 +858,3 @@ def pull_shoot(
         typer.echo(f"Errors: {total_errors}", err=True)
     typer.echo(f"{'=' * 70}\n")
     typer.echo("Project is ready for editing.")
-
