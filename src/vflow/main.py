@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 from . import config
 from .checkout_service import checkout_shoot, report_checkout
+from .export_archive import archive_export, report_archive
 
 app = typer.Typer()
 
@@ -286,22 +287,53 @@ def pull(
 
 @app.command()
 def archive(
-    shoot: str = typer.Option(..., "--shoot", "-n", help="Name of the shoot"),
-    file: str = typer.Option(..., "--file", "-f", help="Filename of the exported video to archive"),
-    tags: str = typer.Option(..., "--tags", "-t", help="Comma-separated metadata tags"),
-    keep_log: bool = typer.Option(False, "--keep-log", help="Do not delete the original S-LOG file from the source folder"),
+    export_type: str = typer.Option(
+        ...,
+        "--type",
+        help="Export type: 'final-video' or 'graded-select'.",
+    ),
+    file: str = typer.Option(
+        ...,
+        "--file",
+        "-f",
+        help="Filename beneath the selected local Exports category.",
+    ),
+    project: Optional[str] = typer.Option(
+        None,
+        "--project",
+        "-p",
+        help="Project identity for a Final Video.",
+    ),
+    shoot: Optional[str] = typer.Option(
+        None,
+        "--shoot",
+        "-n",
+        help="Shoot identity for a Graded Select.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Verify and preview the archive operation without copying.",
+    ),
 ):
-    """
-    Archives a final render, tags it, and cleans up the source file.
-    """
-    typer.echo(f"Archiving '{file}' from shoot '{shoot}'...")
-    
+    """Copy and verify a retained export without deleting any local files."""
     app_config = config.load_config()
-    work_ssd_dest = config.get_location(app_config, "work_ssd")
-    archive_hdd_dest = config.get_location(app_config, "archive")
-    
-    
-    actions.archive_file(shoot, file, tags, keep_log, work_ssd_dest, archive_hdd_dest)
+    exports = config.get_location(app_config, "exports")
+    archive_path = config.get_location(app_config, "archive")
+    try:
+        result = archive_export(
+            exports,
+            archive_path,
+            export_type,
+            file,
+            project=project,
+            shoot=shoot,
+            dry_run=dry_run,
+        )
+    except (OSError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    report_archive(result)
 
 @app.command()
 def create_select(
