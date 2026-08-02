@@ -9,7 +9,7 @@ A creative editing effort that combines media from one or more Shoots and produc
 _Avoid_: Job folder, shoot project
 
 **Shoot**:
-A date-range collection of captured media containing one or more Import Batches. A Shoot is independent of the Projects that use it.
+Footage captured in a certain date range and stored as one named collection. A Shoot contains one or more Import Batches and is independent of the Projects that use it.
 _Avoid_: Project, day folder
 
 **Import Batch**:

@@ -4,6 +4,22 @@ set -euo pipefail
 echo "v-flow installer"
 echo "----------------"
 
+SKILLS_ONLY=false
+case "${1-}" in
+  "") ;;
+  --skills-only) SKILLS_ONLY=true ;;
+  --help)
+    echo "Usage: ./install_vflow.sh [--skills-only]"
+    echo "  --skills-only  Refresh copied skills from this checkout without installing the CLI."
+    exit 0
+    ;;
+  *)
+    echo "Error: unknown option: $1"
+    echo "Usage: ./install_vflow.sh [--skills-only]"
+    exit 1
+    ;;
+esac
+
 # Determine where to load skills from.
 # If the script is on disk (run from a checkout), use that directory.
 # If it's being piped via curl, download the repo archive to a temp directory.
@@ -37,14 +53,22 @@ if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
   fi
 fi
 
-echo
-echo "1) Installing or upgrading vflow-cli via pip (provides the v-flow command)..."
-"${PYTHON_BIN}" -m pip install --upgrade vflow-cli
+if [ "${SKILLS_ONLY}" = false ]; then
+  echo
+  echo "1) Installing or upgrading vflow-cli via pip (provides the v-flow command)..."
+  "${PYTHON_BIN}" -m pip install --upgrade vflow-cli
+else
+  echo
+  echo "1) Keeping the existing vflow-cli installation (--skills-only)."
+fi
 
 echo
-echo "2) Installing v-flow skills for Claude Code and Cursor (if present)..."
+echo "2) Refreshing v-flow skills for Codex, Claude Code, and Cursor..."
 
 TARGETS=()
+
+# Codex personal skills directory
+TARGETS+=("${CODEX_HOME:-$HOME/.codex}/skills")
 
 # Claude Code personal skills directory
 TARGETS+=("$HOME/.claude/skills")
@@ -52,17 +76,35 @@ TARGETS+=("$HOME/.claude/skills")
 # Cursor global skills directory
 TARGETS+=("$HOME/.cursor/skills")
 
+RETIRED_SKILLS=(
+  vflow-backup-cleanup-assistant
+  vflow-delivery-tagging-assistant
+  vflow-ingest-project-assistant
+  vflow-maintenance-assistant
+  vflow-setup-assistant
+)
+
 for TARGET in "${TARGETS[@]}"; do
   echo
-  echo "-> Installing skills into: ${TARGET}"
+  echo "-> Refreshing skills in: ${TARGET}"
   mkdir -p "${TARGET}"
 
+  for RETIRED_SKILL in "${RETIRED_SKILLS[@]}"; do
+    RETIRED_DEST="${TARGET}/${RETIRED_SKILL}"
+    if [ -d "${RETIRED_DEST}" ]; then
+      rm -R -- "${RETIRED_DEST}"
+      echo "   - Removed retired skill: ${RETIRED_SKILL}"
+    fi
+  done
+
   for SKILL_DIR in "${SKILLS_SRC}"/*; do
-    [ -d "${SKILL_DIR}" ] || continue
+    [ -f "${SKILL_DIR}/SKILL.md" ] || continue
     NAME="$(basename "${SKILL_DIR}")"
     DEST="${TARGET}/${NAME}"
 
-    rm -rf "${DEST}"
+    if [ -d "${DEST}" ]; then
+      rm -R -- "${DEST}"
+    fi
     cp -R "${SKILL_DIR}" "${DEST}"
     echo "   - Installed skill: ${NAME}"
   done
@@ -73,13 +115,12 @@ cat <<'EOF'
 Done.
 
 Next steps:
-- Open Claude Code or Cursor.
-- Start a new chat and say: "Set up v-flow" — this configures your archive, laptop, and SSD paths.
+- Open Codex, Claude Code, or Cursor.
+- Start a new task and say: "Set up v-flow and explain each storage location as we go."
 - Once configured, try prompts like:
-  - "Ingest my card and set up a project on my SSD."
-  - "Back up my ingest folder and free up space."
-  - "Show me duplicate clips from the last day."
+  - "Copy this camera card somewhere safe, then put the footage on my SSD for editing."
+  - "Save this finished video to my long-term storage and keep the local export."
+  - "Remove the temporary editing footage after checking that the safe copy is complete."
 
 The v-flow skills will orchestrate the local `v-flow` CLI using your ~/.vflow_config.yml.
 EOF
-
