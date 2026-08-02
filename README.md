@@ -117,8 +117,8 @@ Work on your project and create reusable, graded clips.
 ### 4. **Create Select** → Save graded clips
 Tag and save graded clips for future use. Archives to permanent storage and places a copy in your project's selects folder.
 
-### 5. **Archive** → Finalize project
-Tag the final export, archive it, and clean up source files from the SSD to free up space.
+### 5. **Finish, then Cleanup** → Preserve the Project and free working storage
+Finish verifies retained outputs and a portable Resolve Project Backup. Cleanup separately removes a Working Copy only after its Archive, Resolve, and confirmation gates pass.
 
 ---
 
@@ -229,6 +229,33 @@ v-flow checkout --shoot "2026-08-02_Stockholm" --direct-archive-access
 ```
 
 Laptop Checkout reports required space, current free space, and the configured `laptop_free_space_reserve_gb`. It stops before copying when the Working Copy would violate that reserve. Repeated or interrupted Checkout reuses existing files only after checksum verification, while differing content stops the entire plan before any new files are copied.
+
+---
+
+### `v-flow cleanup`
+
+Removes one Checkout-created Working Copy after proving that every file matches its Archive manifest. Cleanup validates the named Resolve Project by default and relinks media from the Working Copy to the archived Camera Originals before deletion when needed.
+
+| Flag | Description |
+|------|-------------|
+| `--shoot, -n` | **(required)** Shoot identity of the Working Copy |
+| `--working-location, -l` | **(required)** Named Working Location containing the Working Copy |
+| `--project, -p` | Resolve Project to validate; required unless Resolve validation is explicitly skipped |
+| `--skip-resolve-validation` | Bypass only Resolve validation; Archive checksums and final confirmation still apply |
+| `--dry-run` | Verify checksums and preview Resolve relinks and deletions without changing files |
+
+```bash
+# Preview every safety gate
+v-flow cleanup --shoot "2026-08-02_Stockholm" --working-location work_ssd --project "Summer Film" --dry-run
+
+# Relink through Resolve, confirm, and remove the verified Working Copy
+v-flow cleanup --shoot "2026-08-02_Stockholm" --working-location work_ssd --project "Summer Film"
+
+# Proceed without Resolve only when accepting that specific risk
+v-flow cleanup --shoot "2026-08-02_Stockholm" --working-location work_ssd --skip-resolve-validation
+```
+
+Cleanup refuses every path inside Archive storage. A checksum mismatch, unresolved Resolve media, unavailable Resolve, or declined confirmation leaves the Working Copy intact. If one filesystem deletion fails after confirmation, Cleanup reports the exact partial result and leaves the failed file in place.
 
 ---
 

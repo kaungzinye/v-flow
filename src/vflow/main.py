@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 from . import config
 from .checkout_service import checkout_shoot, report_checkout
+from .cleanup_service import delete_working_copy, prepare_cleanup, report_cleanup
 from .export_archive import archive_export, report_archive
 from .finish_service import finish_project, report_finish
 from .resolve_adapter import ResolveUnavailableError, get_resolve_adapter
@@ -408,6 +409,74 @@ def finish(
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
     report_finish(result)
+
+
+@app.command()
+def cleanup(
+    shoot: str = typer.Option(
+        ...,
+        "--shoot",
+        "-n",
+        help="Shoot identity whose Working Copy is eligible for removal.",
+    ),
+    working_location: str = typer.Option(
+        ...,
+        "--working-location",
+        "-l",
+        help="Named Working Location containing the Working Copy.",
+    ),
+    project: Optional[str] = typer.Option(
+        None,
+        "--project",
+        "-p",
+        help="Resolve Project whose media links must remain valid.",
+    ),
+    skip_resolve_validation: bool = typer.Option(
+        False,
+        "--skip-resolve-validation",
+        "--skip-resolve",
+        help="Explicitly bypass only the Resolve validation gate.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Run every non-mutating gate and preview deletion.",
+    ),
+):
+    """Remove a Working Copy only after every Cleanup safety gate passes."""
+    app_config = config.load_config()
+    archive_path = config.get_location(app_config, "archive")
+    try:
+        if not skip_resolve_validation and not project:
+            raise ValueError(
+                "Resolve validation gate failed: --project is required unless --skip-resolve-validation is supplied"
+            )
+        adapter = None if skip_resolve_validation else get_resolve_adapter
+        plan = prepare_cleanup(
+            app_config,
+            archive_path,
+            shoot,
+            working_location,
+            project,
+            adapter,
+            skip_resolve_validation=skip_resolve_validation,
+            dry_run=dry_run,
+        )
+        report_cleanup(plan)
+        if dry_run:
+            return
+        if not typer.confirm(
+            f"Delete {len(plan['files'])} verified files from this Working Copy?"
+        ):
+            typer.echo("Confirmation gate declined; no files were deleted.", err=True)
+            raise typer.Exit(code=1)
+        result = delete_working_copy(plan)
+        report_cleanup(result)
+        if result["failures"]:
+            raise typer.Exit(code=1)
+    except (OSError, ResolveUnavailableError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
 
 @app.command()
 def create_select(
