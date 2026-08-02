@@ -7,6 +7,7 @@ from .checkout_service import checkout_shoot, report_checkout
 from .export_archive import archive_export, report_archive
 from .finish_service import finish_project, report_finish
 from .resolve_adapter import ResolveUnavailableError, get_resolve_adapter
+from .restore_service import report_restore, restore_archive_asset
 
 app = typer.Typer()
 
@@ -91,6 +92,44 @@ def checkout(
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
     report_checkout(result)
+
+
+@app.command()
+def restore(
+    source: str = typer.Option(
+        ...,
+        "--source",
+        "-s",
+        help="Explicit archived file or directory, as an Archive-relative or absolute path.",
+    ),
+    destination: str = typer.Option(
+        ...,
+        "--destination",
+        "-d",
+        help="Exact destination file for a file source, or destination root for a directory source.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Verify and preview paths, sizes, conflicts, and copies without changing files.",
+    ),
+):
+    """Create a verified copy of an archived asset at a chosen destination."""
+    app_config = config.load_config()
+    archive_path = config.get_location(app_config, "archive")
+    try:
+        result = restore_archive_asset(
+            archive_path,
+            source,
+            destination,
+            dry_run=dry_run,
+        )
+    except (OSError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    report_restore(result)
+    if result["conflicts"]:
+        raise typer.Exit(code=1)
 
 @app.command("ingest-report")
 def ingest_report_cmd(
