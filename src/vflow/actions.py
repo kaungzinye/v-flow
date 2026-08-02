@@ -3,10 +3,10 @@ Thin façade that re-exports every public action from the service modules.
 
 main.py and tests import ``actions.*``; the real implementations live in:
 
-- ingest_service   – ingest_shoot, ingest_report, prep_shoot, pull_shoot
-- delivery_service – archive_file, create_select_file, copy_metadata_folder
+- ingest_service   – ingest_shoot, ingest_report, card_report, and photo_ingest
+- delivery_service – archive_file and copy_metadata_folder
 - backup_service   – consolidate_files, verify_backup, list_backups,
-                     restore_folder, list_duplicates, remove_duplicates
+                     restore_folder, and list_duplicates
 """
 
 from .ingest_service import (  # noqa: F401
@@ -14,13 +14,10 @@ from .ingest_service import (  # noqa: F401
     ingest_shoot,
     photo_ingest,
     card_report,
-    prep_shoot,
-    pull_shoot,
 )
 
 from .delivery_service import (  # noqa: F401
     archive_file,
-    create_select_file,
     copy_metadata_folder,
 )
 
@@ -31,7 +28,6 @@ from .backup_service import (  # noqa: F401
     list_backups,
     restore_folder,
     list_duplicates,
-    remove_duplicates,
 )
 
 # Re-export core helpers that tests import via actions.*

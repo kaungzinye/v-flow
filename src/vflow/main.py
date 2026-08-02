@@ -20,10 +20,6 @@ def ingest(
     shoot: str = typer.Option(None, "--shoot", "-n", help="Name of the shoot (e.g., '2025-09-15_Stockholm_Broll'). Optional if --auto is used."),
     import_batch: str = typer.Option(None, "--import-batch", help="Stable Import Batch identity. By default, v-flow derives one from the source hierarchy and content."),
     auto: bool = typer.Option(False, "--auto", "-a", help="Automatically infer shoot folder name from file dates. Creates date range if spanning multiple days."),
-    force: bool = typer.Option(False, "--force", "-f", help="Accepted for legacy scripts; immutable batches never overwrite conflicts."),
-    skip_laptop: bool = typer.Option(False, "--skip-laptop", help="Accepted for legacy scripts; ingest never creates a Working Copy."),
-    workspace: bool = typer.Option(False, "--workspace", "-w", help="Unsupported for ingest; create a Working Copy with Checkout."),
-    split_by_gap: int = typer.Option(0, "--split-by-gap", help="Unsupported for immutable Import Batches, which preserve one received source hierarchy."),
     files: list[str] = typer.Option(None, "--files", help="Optional: Specific filenames, patterns, or ranges to ingest (e.g., 'C3317' or 'C3317-C3351'). Can specify multiple times. If omitted, ingests all files."),
 ):
     """
@@ -48,10 +44,6 @@ def ingest(
         shoot,
         archive_dest,
         auto=auto,
-        force=force,
-        skip_laptop=skip_laptop,
-        workspace=workspace,
-        split_threshold=split_by_gap,
         files_filter=files,
         import_batch_id=import_batch,
     )
@@ -245,88 +237,6 @@ def list_duplicates_cmd(
         typer.echo("Invalid --location. Use 'archive', 'laptop', or 'both'.", err=True)
         raise typer.Exit(code=1)
 
-@app.command("remove-duplicates")
-def remove_duplicates_cmd(
-    dry_run: bool = typer.Option(False, "--dry-run", help="Only report what would be removed"),
-    past_hours: Optional[int] = typer.Option(None, "--past-hours", "-H", help="Only consider files modified in the last N hours (e.g. 24 for newly ingested)"),
-):
-    """
-    Remove duplicate files (same name + size in multiple shoot folders) from
-    archive Video/RAW and laptop ingest. Keeps one copy per file, deletes the rest.
-    Use --past-hours 24 to only remove duplicates among recently ingested files.
-    """
-    app_config = config.load_config()
-    archive_dest = config.get_location(app_config, "archive")
-    laptop_dest = config.get_location(app_config, "laptop")
-    archive_raw = archive_dest / "Video" / "RAW"
-    suffix = f" (only files modified in last {past_hours}h)" if past_hours else ""
-    typer.echo("Scanning archive for duplicates...")
-    if archive_raw.exists():
-        n_archive = actions.remove_duplicates(archive_raw, dry_run=dry_run, max_age_hours=past_hours)
-        typer.echo(f"Archive: {n_archive} duplicate(s) {'would be ' if dry_run else ''}removed.{suffix}")
-    else:
-        typer.echo("Archive Video/RAW not found.")
-    typer.echo("Scanning laptop ingest for duplicates...")
-    if laptop_dest.exists():
-        n_laptop = actions.remove_duplicates(laptop_dest, dry_run=dry_run, max_age_hours=past_hours)
-        typer.echo(f"Laptop: {n_laptop} duplicate(s) {'would be ' if dry_run else ''}removed.{suffix}")
-    else:
-        typer.echo("Laptop ingest folder not found.")
-    typer.echo("Done.")
-
-@app.command()
-def prep(
-    shoot: str = typer.Option(..., "--shoot", "-n", help="Name of the shoot to prepare for editing"),
-):
-    """
-    Prepares a shoot for editing by moving it to the work SSD.
-    """
-    typer.echo(f"Preparing '{shoot}' for editing...")
-    
-    # Load configuration
-    app_config = config.load_config()
-    
-    # Get locations
-    laptop_dest = config.get_location(app_config, "laptop")
-    work_ssd_dest = config.get_location(app_config, "work_ssd")
-    
-    actions.prep_shoot(shoot, laptop_dest, work_ssd_dest)
-
-@app.command()
-def pull(
-    shoot: str = typer.Option(..., "--shoot", "-n", help="Name of the shoot to pull from archive"),
-    source: str = typer.Option("raw", "--source", "-s", help="What to pull: 'raw' (default), 'selects', or 'both'. Raw files go to 01_Source, graded selects go to 05_Graded_Selects."),
-    files: list[str] = typer.Option(None, "--files", "-f", help="Optional: Specific filenames, patterns, or ranges to pull (e.g., 'C3317' or 'C3317-C3351'). Can specify multiple times. If omitted, pulls all files."),
-):
-    """
-    Pulls files from archive to the work SSD for editing.
-    
-    Useful when you want to work with archived footage. Creates the standard
-    project structure and copies (doesn't move) files from archive to your work SSD.
-    
-    Source options:
-    - 'raw': Pull raw files from Video/RAW/ to 01_Source/ (default)
-    - 'selects': Pull graded selects from Video/Graded_Selects/ to 05_Graded_Selects/
-    - 'both': Pull both raw files and graded selects to their respective folders
-    
-    You can optionally specify specific files or partial filenames to pull only
-    selected clips.
-    """
-    if source not in ("raw", "selects", "both"):
-        typer.echo(f"Invalid source type: {source}. Must be 'raw', 'selects', or 'both'.", err=True)
-        raise typer.Exit(code=1)
-    
-    typer.echo(f"Pulling '{shoot}' from archive to work SSD (source: {source})...")
-    
-    # Load configuration
-    app_config = config.load_config()
-    
-    # Get locations
-    work_ssd_dest = config.get_location(app_config, "work_ssd")
-    archive_dest = config.get_location(app_config, "archive")
-    
-    actions.pull_shoot(shoot, work_ssd_dest, archive_dest, source_type=source, files_filter=files)
-
 @app.command()
 def archive(
     export_type: str = typer.Option(
@@ -479,23 +389,6 @@ def cleanup(
         raise typer.Exit(code=1)
 
 @app.command()
-def create_select(
-    shoot: str = typer.Option(..., "--shoot", "-n", help="Name of the shoot"),
-    file: str = typer.Option(..., "--file", "-f", help="Filename of the exported video to create a select from"),
-    tags: str = typer.Option(..., "--tags", "-t", help="Comma-separated metadata tags"),
-):
-    """
-    Creates a graded select, archiving it and copying it to the local SSD for reuse.
-    """
-    typer.echo(f"Creating select for '{file}' from shoot '{shoot}'...")
-    
-    app_config = config.load_config()
-    work_ssd_dest = config.get_location(app_config, "work_ssd")
-    archive_hdd_dest = config.get_location(app_config, "archive")
-    
-    actions.create_select_file(shoot, file, tags, work_ssd_dest, archive_hdd_dest)
-
-@app.command()
 def consolidate(
     source: str = typer.Option(..., "--source", "-s", help="Source directory to scan for unique files"),
     output_folder: str = typer.Option(None, "--output-folder", "-o", help="Name of the folder to create in the archive for unique media (required if --destination not provided)"),
@@ -540,11 +433,6 @@ def backup(
     files: list[str] = typer.Option(None, "--files", "-f", help="Optional: Specific filenames, patterns, or ranges to back up (e.g., 'C3317' or 'C3317-C3351'). Can specify multiple times. If omitted, processes all files."),
     tags: str = typer.Option(None, "--tags", "-t", help="Optional: Comma-separated metadata tags to add to copied files."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Analyze what would be backed up without copying any files."),
-    delete_source: bool = typer.Option(
-        False,
-        "--delete-source",
-        help="After copying, prompt to optionally delete source files that were successfully backed up.",
-    ),
 ):
     """
     Backs up media from an arbitrary source folder into the archive with duplicate checks.
@@ -555,10 +443,6 @@ def backup(
     Use --dry-run first to see which files are not already in the archive.
     """
     typer.echo(f"{'Dry-running' if dry_run else 'Backing up'} from '{source}' to archive destination '{destination}'...")
-    if delete_source and dry_run:
-        typer.echo(
-            "Note: --delete-source is set; this dry-run will only report which files would be eligible for deletion after a real backup."
-        )
 
     app_config = config.load_config()
     archive_hdd_dest = config.get_location(app_config, "archive")
@@ -572,7 +456,6 @@ def backup(
         tags=tags,
         preserve_structure=True,
         dry_run=dry_run,
-        delete_source=delete_source,
     )
 
 
@@ -581,11 +464,6 @@ def verify_backup_cmd(
     source: str = typer.Option(..., "--source", "-s", help="Source directory that was backed up."),
     destination: str = typer.Option(
         ..., "--destination", "-d", help="Destination directory where backup was written."
-    ),
-    allow_delete: bool = typer.Option(
-        False,
-        "--allow-delete",
-        help="After successful verification, prompt to delete all files under the source folder.",
     ),
     archive_wide: bool = typer.Option(
         False,
@@ -598,11 +476,10 @@ def verify_backup_cmd(
     Verify that all files in a source folder exist in a destination folder with matching sizes.
 
     This is a general-purpose checker for any two folders (e.g. Desktop/Ingest vs archive).
-    Use together with 'backup' or any other copy method to confirm that your backup is complete
-    before optionally deleting the source files.
+    Use together with 'backup' or any other copy method to confirm that your backup is complete.
     """
     typer.echo(f"Verifying backup between source '{source}' and destination '{destination}'...")
-    actions.verify_backup(source, destination, allow_delete=allow_delete, archive_wide=archive_wide)
+    actions.verify_backup(source, destination, archive_wide=archive_wide)
 
 
 @app.command("list-backups")

@@ -18,7 +18,6 @@ def consolidate_files(
     tags: Optional[str] = None,
     preserve_structure: bool = True,
     dry_run: bool = False,
-    delete_source: bool = False,
 ) -> None:
     """
     Finds unique files from a source directory and copies them to the archive.
@@ -123,7 +122,6 @@ def consolidate_files(
     copied_count = 0
     skipped_count = 0
     error_count = 0
-    copied_sources: list[Path] = []
 
     if dry_run:
         with typer.progressbar(source_files, label="Analyzing for backup") as progress:
@@ -157,11 +155,6 @@ def consolidate_files(
 
                     copied_count += 1
                     typer.echo(f"WOULD COPY: {file} -> {dest_file}")
-                    if delete_source:
-                        typer.echo(
-                            f"WOULD DELETE AFTER COPY (after manual confirmation): {file}"
-                        )
-
                 except FileNotFoundError:
                     continue
                 except Exception as e:
@@ -232,8 +225,6 @@ def consolidate_files(
                                     err=True,
                                 )
 
-                        if delete_source:
-                            copied_sources.append(file)
                     else:
                         error_count += 1
 
@@ -252,44 +243,10 @@ def consolidate_files(
         typer.echo(f"Errors: {error_count}", err=True)
     typer.echo(f"See log files in {output_path} for details.")
 
-    if delete_source and copied_sources:
-        typer.echo("\nBackup step finished.")
-        typer.echo(
-            f"{len(copied_sources)} source file(s) are eligible for deletion (only files that were actually copied)."
-        )
-        confirm = typer.confirm(
-            "Do you want to delete these source files from the backup source folder now?"
-        )
-        if confirm:
-            deleted = 0
-            delete_errors = 0
-            for src in copied_sources:
-                try:
-                    if src.exists():
-                        src.unlink()
-                        deleted += 1
-                except Exception as e:
-                    delete_errors += 1
-                    typer.echo(
-                        f"⚠ Warning: Could not delete source file {src}: {e}",
-                        err=True,
-                    )
-            typer.echo(f"\nSource cleanup complete. Deleted {deleted} file(s).")
-            if delete_errors:
-                typer.echo(
-                    f"{delete_errors} file(s) could not be deleted. See warnings above.",
-                    err=True,
-                )
-        else:
-            typer.echo(
-                "\nNo source files were deleted. You can safely inspect the archive and rerun backup with --delete-source later if desired."
-            )
-
 
 def verify_backup(
     source_dir: str,
     dest_dir: str,
-    allow_delete: bool = False,
     archive_wide: bool = False,
 ) -> None:
     """
@@ -392,46 +349,6 @@ def verify_backup(
     typer.echo(
         "\nBackup verification PASSED. All source files exist in destination with matching sizes."
     )
-
-    if not allow_delete:
-        return
-
-    confirm = typer.confirm(
-        "\nDo you want to delete all files under the source folder now?\n"
-        f"  Source: {source_path}\n"
-    )
-    if not confirm:
-        typer.echo("\nNo files were deleted. Source remains intact.")
-        return
-
-    deleted = 0
-    delete_errors = 0
-    for f in source_path.rglob("*"):
-        if f.is_file():
-            try:
-                f.unlink()
-                deleted += 1
-            except Exception as e:
-                delete_errors += 1
-                typer.echo(
-                    f"⚠ Warning: Could not delete file {f}: {e}", err=True
-                )
-
-    for d in sorted(
-        source_path.rglob("*"), key=lambda p: len(str(p)), reverse=True
-    ):
-        if d.is_dir():
-            try:
-                d.rmdir()
-            except OSError:
-                pass
-
-    typer.echo(f"\nSource cleanup complete. Deleted {deleted} file(s).")
-    if delete_errors:
-        typer.echo(
-            f"{delete_errors} file(s) could not be deleted. See warnings above.",
-            err=True,
-        )
 
 
 def list_backups(archive_path: Path, subpath: str) -> None:
@@ -756,63 +673,4 @@ def list_duplicates(
             except (OSError, FileNotFoundError):
                 pass
     return [(key, paths) for key, paths in by_key.items() if len(paths) > 1]
-
-
-def remove_duplicates(
-    root: Path, dry_run: bool = False, max_age_hours: Optional[int] = None
-) -> int:
-    """
-    Within a root folder, find all video files and remove duplicates: same
-    (filename, size) in multiple places. Keeps one copy (first by path sort)
-    and deletes the rest. Returns number removed. If max_age_hours is set,
-    only consider files modified in the last N hours.
-    """
-    import time
-
-    video_extensions = {
-        ".mp4",
-        ".mov",
-        ".mxf",
-        ".mts",
-        ".avi",
-        ".m4v",
-        ".braw",
-        ".r3d",
-        ".crm",
-    }
-    cutoff = (time.time() - max_age_hours * 3600) if max_age_hours else None
-    by_key: dict[tuple[str, int], list[Path]] = {}
-    for f in root.rglob("*"):
-        if f.is_file() and f.suffix.lower() in video_extensions:
-            try:
-                st = f.stat()
-                if cutoff is not None and st.st_mtime < cutoff:
-                    continue
-                key = (f.name, st.st_size)
-                by_key.setdefault(key, []).append(f)
-            except (OSError, FileNotFoundError):
-                pass
-    removed = 0
-    for key, paths in by_key.items():
-        if len(paths) <= 1:
-            continue
-        paths_sorted = sorted(paths, key=lambda p: str(p))
-        keep, duplicates = paths_sorted[0], paths_sorted[1:]
-        for dup in duplicates:
-            if dry_run:
-                typer.echo(f"  [dry-run] would remove duplicate: {dup}")
-            else:
-                try:
-                    dup.unlink()
-                    try:
-                        rel = dup.relative_to(root)
-                    except ValueError:
-                        rel = dup
-                    typer.echo(f"  Removed duplicate: {rel}")
-                    removed += 1
-                except OSError as e:
-                    typer.echo(
-                        f"  [ERROR] Could not remove {dup}: {e}", err=True
-                    )
-    return removed
 
