@@ -2,7 +2,7 @@
 
 Explain the storage choices before asking for paths:
 
-- **Archive** — the protected, long-term location for original footage and retained outputs; usually an HDD.
+- **Archive** — the protected, long-term location for original media and retained outputs; usually an HDD.
 - **Exports** — the folder where rendered videos appear before v-flow copies them into long-term storage.
 - **Working location** — a named laptop or fast drive that may hold temporary footage for editing.
 
