@@ -1,0 +1,14 @@
+{
+  "name": "vflow",
+  "description": "Store and move video footage and photos safely: checksum-verified card ingest into an archive, working copies for editing, Resolve-aware finish and cleanup.",
+  "version": "0.1.5",
+  "author": {
+    "name": "Kaung",
+    "email": "kaungzinye@gmail.com",
+    "url": "https://github.com/kaungzinye"
+  },
+  "homepage": "https://github.com/kaungzinye/v-flow",
+  "repository": "https://github.com/kaungzinye/v-flow",
+  "license": "MIT",
+  "keywords": ["video", "photos", "ingest", "archive", "backup", "davinci-resolve", "media"]
+}
