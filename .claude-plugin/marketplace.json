@@ -8,7 +8,7 @@
     {
       "name": "v-flow",
       "source": "./",
-      "description": "Copies camera cards into a checksum-verified archive, manages editing copies, and deletes nothing until the archived original proves intact. Works with DaVinci Resolve."
+      "description": "Copies camera cards into a protected long-term archive, keeps editing copies organized, and deletes nothing until the original copy is proven safe. Works with DaVinci Resolve."
     }
   ]
 }
