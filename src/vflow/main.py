@@ -28,14 +28,15 @@ def ingest(
     """
     Copies one card's footage into a flat Shoot and its photos into a flat Collection.
 
-    Footage lands directly in Video/RAW/<shoot>, photos in Photo/RAW/<collection>, which
-    carries the Shoot name unless --collection names it. A card without footage creates no
-    Shoot, and a card without photos creates no Collection. Editing sidecars (.pp3, .xmp)
-    ride into the Collection beside the photo they belong to, including when --files selects
-    the photo. Each folder carries a hidden SHA-256 manifest recording every archived file,
-    its card path, exclusions, and deduplicated originals. A skip needs checksum identity, so
-    recycled camera filenames stay distinct. Ingest leaves the source untouched and creates
-    no Working Copy.
+    Footage lands in Video/RAW/<shoot> and photos in Photo/RAW/<collection>, which carries
+    the Shoot name unless --collection names it. A card without footage creates no Shoot, and
+    a card without photos creates no Collection. Editing sidecars (.pp3, .xmp) ride beside
+    the photo they belong to, including when --files selects the photo.
+
+    Each folder carries a hidden SHA-256 manifest recording every archived file, its card
+    path, exclusions, and deduplicated originals. A skip needs checksum identity, so recycled
+    camera filenames stay distinct. Ingest leaves the source untouched and creates no
+    Working Copy.
     """
     if not auto and not shoot:
         typer.echo("Either --shoot or --auto must be provided.", err=True)
