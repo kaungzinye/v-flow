@@ -9,10 +9,12 @@ import typer
 
 from . import config
 from .core.fs_ops import _format_bytes
+from .progress import Progress
 from .shoot_manifest import (
     Layout,
     MANIFEST_NAME,
     checksum as _checksum,
+    copy_bytes,
     read_manifest,
     relative_path as _relative_path,
     safe_identity as _safe_identity,
@@ -118,7 +120,7 @@ def _plan_working_copy(entries: list[dict], destination: Path) -> dict:
     }
 
 
-def _copy_verified(entry: dict) -> str:
+def _copy_verified(entry: dict, on_bytes=None) -> str:
     source = entry["source"]
     destination = entry["destination"]
     if destination.exists():
@@ -131,7 +133,7 @@ def _copy_verified(entry: dict) -> str:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.vflow-part")
     try:
-        shutil.copy2(source, temporary)
+        copy_bytes(source, temporary, on_bytes)
         if _checksum(temporary, entry["algorithm"]) != entry["checksum"]:
             raise ValueError(f"Working Copy checksum verification failed for {source}")
         os.replace(temporary, destination)
@@ -212,9 +214,15 @@ def checkout_shoot(
 
     copied = 0
     reused_during_copy = 0
+    reporter = Progress(
+        "Copying", len(plan["copy_entries"]), plan["required_bytes"]
+    )
+    reporter.resuming(len(plan["reused_entries"]), plan["files"])
     try:
         for entry in plan["copy_entries"]:
-            outcome = _copy_verified(entry)
+            reporter.start(entry["name"], entry["byte_size"])
+            outcome = _copy_verified(entry, reporter.within_file(entry["byte_size"]))
+            reporter.settled(entry["byte_size"])
             if outcome == "copied":
                 copied += 1
             else:

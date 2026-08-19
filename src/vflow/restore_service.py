@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shutil
 from pathlib import Path
+
+from .progress import Progress
+from .shoot_manifest import copy_bytes
 
 
 CHECKSUM_ALGORITHM = "sha256"
@@ -132,7 +134,7 @@ def _plan_restore(source: Path, destination: Path) -> dict:
     }
 
 
-def _copy_verified(entry: dict) -> str:
+def _copy_verified(entry: dict, on_bytes=None) -> str:
     source = entry["source"]
     destination = entry["destination"]
     if destination.exists():
@@ -143,7 +145,7 @@ def _copy_verified(entry: dict) -> str:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}{PARTIAL_SUFFIX}")
     try:
-        shutil.copy2(source, temporary)
+        copy_bytes(source, temporary, on_bytes)
         if _checksum(temporary) != entry["checksum"]:
             raise ValueError(f"Restore checksum verification failed for {source}")
         os.replace(temporary, destination)
@@ -178,9 +180,17 @@ def restore_archive_asset(
 
     copied = 0
     skipped = 0
+    reporter = Progress("Restoring", result["copy_files"], result["copy_bytes"])
+    reporter.resuming(result["skip_files"], result["source_files"])
     try:
         for entry in result["entries"]:
-            outcome = _copy_verified(entry)
+            if entry["action"] == "copy":
+                reporter.start(entry["destination"].name, entry["byte_size"])
+            outcome = _copy_verified(
+                entry, reporter.within_file(entry["byte_size"])
+            )
+            if entry["action"] == "copy":
+                reporter.settled(entry["byte_size"])
             copied += outcome == "copied"
             skipped += outcome == "skipped"
     except (OSError, ValueError) as error:

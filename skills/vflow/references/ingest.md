@@ -23,6 +23,8 @@ A Shoot is footage captured in a certain date range, held as one flat folder at 
    v-flow ingest --source <source> --auto [--include-all] [--merge-into <name> | --no-merge]
    ```
 
+   A card takes as long as it takes. The CLI prints a plain progress line every few seconds giving files and bytes done of the total and the file in hand, so a quiet stretch is work, not a hang. An interrupted ingest is safe: re-run the exact same command, and it resumes from the manifest, states how many files are already verified, and copies only the rest.
+
    Complete when the CLI reports each folder it wrote and its counts, or names the safety check that failed.
 
 4. Report where the footage and the photos are stored, how many files of each kind were copied, already verified, deduplicated, and excluded, and that the card or source remains unchanged.

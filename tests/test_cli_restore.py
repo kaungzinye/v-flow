@@ -161,12 +161,12 @@ def test_interrupted_restore_cleans_partial_file_and_resumes(tmp_path, monkeypat
     original_copy = restore_service._copy_verified
     attempts = 0
 
-    def interrupt_second_copy(entry):
+    def interrupt_second_copy(entry, on_bytes=None):
         nonlocal attempts
         attempts += 1
         if attempts == 2:
             raise OSError("simulated interruption")
-        return original_copy(entry)
+        return original_copy(entry, on_bytes)
 
     monkeypatch.setattr(restore_service, "_copy_verified", interrupt_second_copy)
     args = ["restore", "--source", str(source), "--destination", str(destination)]

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from .core.date_utils import media_date, record_media_dates
+from .progress import Progress
 from .shoot_manifest import (
     Layout,
     MANIFEST_NAME,
@@ -176,6 +177,11 @@ def ingest_photos(
             riders.setdefault(pair[0], []).append((relative, path, pair[1]))
 
     counts = {"copied": 0, "verified": 0, "deduplicated": 0, "excluded": 0}
+    reporter = Progress("Archiving", len(candidates), sum(sizes.values()))
+    reporter.resuming(
+        sum(1 for relative, _ in candidates if (batch_id, relative.as_posix()) in recorded),
+        len(candidates),
+    )
 
     def target_for(location: str) -> _Collection:
         directory = (archive / location).parent
@@ -209,6 +215,7 @@ def ingest_photos(
         """Land one file in a Collection, reusing an identical copy already sitting there."""
         card_path = relative.as_posix()
         byte_size = sizes[card_path]
+        reporter.start(card_path, byte_size)
         source_checksum = checksum(source_file)
         record = {
             "name": desired,
@@ -228,10 +235,16 @@ def ingest_photos(
                     record["original_name"] = relative.name
                 target.add(record)
             counts["verified"] += 1
+            reporter.settled(byte_size)
             return
 
         name = destination_name(desired, set(target.taken), target.directory)
-        place_verified(source_file, target.directory / name, expected=source_checksum)
+        place_verified(
+            source_file,
+            target.directory / name,
+            expected=source_checksum,
+            on_bytes=reporter.within_file(byte_size),
+        )
         record["name"] = name
         if name != relative.name:
             record["original_name"] = relative.name
@@ -240,6 +253,7 @@ def ingest_photos(
             source_checksum, (target.directory / name).relative_to(archive).as_posix()
         )
         counts["copied"] += 1
+        reporter.settled(byte_size)
 
     for relative, source_file in candidates:
         card_path = relative.as_posix()
@@ -249,6 +263,7 @@ def ingest_photos(
         if relative in attached:
             continue
 
+        reporter.start(card_path, byte_size)
         reason = _exclusion_reason(relative, attached=False)
         if reason is not None:
             record_exclusion(
@@ -261,6 +276,7 @@ def ingest_photos(
                     "ingested_at": ingested_at,
                 },
             )
+            reporter.settled(byte_size)
             primary.save()
             continue
 
@@ -275,6 +291,7 @@ def ingest_photos(
                 stored = entry["name"]
                 primary.note(source_file)
                 counts["verified"] += 1
+                reporter.settled(byte_size)
             else:
                 manifest["files"].remove(entry)
                 primary.taken.pop(entry["name"], None)
@@ -311,13 +328,17 @@ def ingest_photos(
                         }
                     )
                     counts["deduplicated"] += 1
+                    reporter.settled(byte_size)
                     target = target_for(existing)
                     stored = Path(existing).name
 
         if stored is None:
             name = destination_name(relative.name, set(primary.taken), collection_path)
             stored_checksum = place_verified(
-                source_file, collection_path / name, expected=source_checksum
+                source_file,
+                collection_path / name,
+                expected=source_checksum,
+                on_bytes=reporter.within_file(byte_size),
             )
             record = {
                 "name": name,
@@ -336,6 +357,7 @@ def ingest_photos(
                 stored_checksum, (collection_path / name).relative_to(archive).as_posix()
             )
             counts["copied"] += 1
+            reporter.settled(byte_size)
             stored = name
 
         for sidecar, sidecar_file, mode in riders.get(relative, []):

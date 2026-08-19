@@ -139,12 +139,12 @@ def test_interrupted_checkout_retries_and_reuses_verified_files(tmp_path, monkey
     original_copy = checkout_service._copy_verified
     attempts = 0
 
-    def fail_second_copy(entry):
+    def fail_second_copy(entry, on_bytes=None):
         nonlocal attempts
         attempts += 1
         if attempts == 2:
             raise OSError("simulated interruption")
-        return original_copy(entry)
+        return original_copy(entry, on_bytes)
 
     monkeypatch.setattr(checkout_service, "_copy_verified", fail_second_copy)
     args = ["checkout", "--shoot", "Shoot", "--working-location", "work_ssd"]

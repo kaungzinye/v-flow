@@ -8,7 +8,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from string import ascii_lowercase
-from typing import Iterable, Mapping, Optional
+from typing import Callable, Iterable, Mapping, Optional
 
 
 CHECKSUM_ALGORITHM = "sha256"
@@ -95,7 +95,11 @@ def shoot_directory(
     return raw_root(archive, kind, layout) / shoot
 
 
-def checksum(path: Path, algorithm: str = CHECKSUM_ALGORITHM) -> str:
+def checksum(
+    path: Path,
+    algorithm: str = CHECKSUM_ALGORITHM,
+    on_bytes: Optional[Callable[[int], None]] = None,
+) -> str:
     try:
         digest = hashlib.new(algorithm)
     except ValueError:
@@ -103,6 +107,8 @@ def checksum(path: Path, algorithm: str = CHECKSUM_ALGORITHM) -> str:
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
             digest.update(chunk)
+            if on_bytes is not None:
+                on_bytes(len(chunk))
     return digest.hexdigest()
 
 
@@ -269,12 +275,14 @@ def scan_unindexed(
     return sized
 
 
-def indexed_entry(path: Path) -> dict:
+def indexed_entry(
+    path: Path, on_bytes: Optional[Callable[[int], None]] = None
+) -> dict:
     """Hash one file where it sits and describe it as indexed in place."""
     return {
         "name": path.name,
         "byte_size": path.stat().st_size,
-        "checksum": checksum(path),
+        "checksum": checksum(path, on_bytes=on_bytes),
         "source": INDEXED_SOURCE,
         "indexed_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -362,7 +370,9 @@ def batch_identity(source: Path, entries: list[tuple[str, int]]) -> str:
     return f"{source_name}-{digest.hexdigest()[:12]}"
 
 
-def copy_hashing(source: Path, temporary: Path) -> str:
+def copy_hashing(
+    source: Path, temporary: Path, on_bytes: Optional[Callable[[int], None]] = None
+) -> str:
     """Copy one file, hashing the single source read."""
     digest = hashlib.new(CHECKSUM_ALGORITHM)
     temporary.parent.mkdir(parents=True, exist_ok=True)
@@ -370,16 +380,36 @@ def copy_hashing(source: Path, temporary: Path) -> str:
         for chunk in iter(lambda: reader.read(CHUNK_SIZE), b""):
             digest.update(chunk)
             writer.write(chunk)
+            if on_bytes is not None:
+                on_bytes(len(chunk))
     shutil.copystat(source, temporary)
     return digest.hexdigest()
 
 
-def place_verified(source: Path, destination: Path, expected: Optional[str] = None) -> str:
+def copy_bytes(
+    source: Path, temporary: Path, on_bytes: Optional[Callable[[int], None]] = None
+) -> None:
+    """Copy one file's contents chunk by chunk, reporting the bytes as they land."""
+    temporary.parent.mkdir(parents=True, exist_ok=True)
+    with source.open("rb") as reader, temporary.open("wb") as writer:
+        for chunk in iter(lambda: reader.read(CHUNK_SIZE), b""):
+            writer.write(chunk)
+            if on_bytes is not None:
+                on_bytes(len(chunk))
+    shutil.copystat(source, temporary)
+
+
+def place_verified(
+    source: Path,
+    destination: Path,
+    expected: Optional[str] = None,
+    on_bytes: Optional[Callable[[int], None]] = None,
+) -> str:
     """Copy into place and prove the destination by re-hashing it on the archive drive."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.vflow-part")
     try:
-        source_checksum = copy_hashing(source, temporary)
+        source_checksum = copy_hashing(source, temporary, on_bytes)
         if expected is not None and source_checksum != expected:
             raise ValueError(f"Source content changed during ingest: {source}")
         if checksum(temporary) != source_checksum:

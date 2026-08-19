@@ -177,8 +177,8 @@ def test_destination_is_verified_by_rehashing_the_archive_copy(tmp_path, monkeyp
     _write(source / "C0001.MP4", b"clip-one")
     original_copy = shoot_manifest.copy_hashing
 
-    def copy_then_corrupt(source_file, temporary):
-        digest = original_copy(source_file, temporary)
+    def copy_then_corrupt(source_file, temporary, on_bytes=None):
+        digest = original_copy(source_file, temporary, on_bytes)
         temporary.write_bytes(b"corrupted-on-arrival")
         return digest
 
@@ -198,12 +198,12 @@ def test_repeated_ingest_resumes_from_the_manifest(tmp_path, monkeypatch):
     original_place = card_ingest.place_verified
     attempts = 0
 
-    def fail_second_copy(source_file, destination, expected=None):
+    def fail_second_copy(source_file, destination, expected=None, on_bytes=None):
         nonlocal attempts
         attempts += 1
         if attempts == 2:
             raise OSError("simulated interruption")
-        return original_place(source_file, destination, expected)
+        return original_place(source_file, destination, expected, on_bytes)
 
     monkeypatch.setattr(card_ingest, "place_verified", fail_second_copy)
     args = ["ingest", "-s", str(source), "-n", "Shoot"]

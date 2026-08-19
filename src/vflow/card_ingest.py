@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from .core.date_utils import media_date, record_media_dates
+from .progress import Progress
 from .shoot_manifest import (
     EXTRAS_DIRECTORY,
     FOOTAGE_EXTENSIONS,
@@ -105,10 +106,17 @@ def ingest_card(
         record_media_dates(manifest, landed)
         write_json_atomically(pending_path, manifest)
 
+    reporter = Progress("Archiving", len(candidates), sum(sizes.values()))
+    reporter.resuming(
+        sum(1 for relative, _ in candidates if (batch_id, relative.as_posix()) in recorded),
+        len(candidates),
+    )
+
     for relative, source_file in candidates:
         card_path = relative.as_posix()
         byte_size = sizes[card_path]
         ingested_at = datetime.now(timezone.utc).isoformat()
+        reporter.start(card_path, byte_size)
 
         reason = _exclusion_reason(relative)
         if reason is not None:
@@ -136,6 +144,7 @@ def ingest_card(
             ]
             manifest["excluded"].append(record)
             excluded += 1
+            reporter.settled(byte_size)
             save_progress()
             continue
 
@@ -145,6 +154,7 @@ def ingest_card(
             if archived.is_file() and checksum(archived) == entry["checksum"]:
                 landed.append(media_date(source_file))
                 verified += 1
+                reporter.settled(byte_size)
                 continue
             manifest["files"].remove(entry)
             taken.pop(entry["name"], None)
@@ -181,12 +191,16 @@ def ingest_card(
                     }
                 )
                 deduplicated += 1
+                reporter.settled(byte_size)
                 save_progress()
                 continue
 
         name = destination_name(relative.name, set(taken), shoot_path)
         stored_checksum = place_verified(
-            source_file, shoot_path / name, expected=source_checksum
+            source_file,
+            shoot_path / name,
+            expected=source_checksum,
+            on_bytes=reporter.within_file(byte_size),
         )
         record = {
             "name": name,
@@ -206,6 +220,7 @@ def ingest_card(
             stored_checksum, (shoot_path / name).relative_to(archive).as_posix()
         )
         copied += 1
+        reporter.settled(byte_size)
         save_progress()
 
     save_progress()

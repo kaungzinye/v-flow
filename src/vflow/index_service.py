@@ -6,6 +6,7 @@ from typing import Iterable, Optional
 import typer
 
 from .core.date_utils import manifest_date_range, media_date, record_media_dates
+from .progress import Progress
 from .shoot_manifest import (
     Layout,
     add_indexed_entry,
@@ -107,8 +108,16 @@ def index_folder(plan: dict) -> dict:
     manifest = plan["manifest"]
     manifest_path = manifest_source(directory)
     hashed = 0
-    for name, _ in plan["pending"]:
-        add_indexed_entry(directory, manifest, indexed_entry(directory / name))
+    reporter = Progress("Hashing", plan["files"], plan["bytes"])
+    reporter.resuming(plan["indexed"], plan["indexed"] + plan["files"], "hashed")
+    for name, byte_size in plan["pending"]:
+        reporter.start(name, byte_size)
+        add_indexed_entry(
+            directory,
+            manifest,
+            indexed_entry(directory / name, reporter.within_file(byte_size)),
+        )
+        reporter.settled(byte_size)
         write_json_atomically(manifest_path, manifest)
         hashed += 1
     if is_partial(manifest) and not uncovered_files(directory, manifest):
