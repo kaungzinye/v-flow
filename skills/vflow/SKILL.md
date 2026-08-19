@@ -19,7 +19,7 @@ If `v-flow` is not on PATH, install it before routing: `uv tool install vflow-cl
 
 Route by the outcome the user wants:
 
-- Set up drives or change where media lives: [references/setup.md](references/setup.md)
+- Set up drives or change where media lives, or check why v-flow isn't working: [references/setup.md](references/setup.md)
 - Copy footage or photos from a camera card or received folder: [references/ingest.md](references/ingest.md)
 - Put footage on an editing drive, edit from the Archive, or remove a temporary editing copy: [references/working-copies.md](references/working-copies.md)
 - Save a finished video, graded clip, or Resolve project backup: [references/delivery.md](references/delivery.md)

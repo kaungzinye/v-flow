@@ -17,43 +17,57 @@ DEFAULT_LAYOUT = {"footage_raw": "Video/RAW", "photo_raw": "Photo/RAW"}
 LAYOUT_KEYS = {"video": "footage_raw", "photo": "photo_raw"}
 
 
-def load_config() -> dict:
-    """Load role-based storage configuration."""
+def parse_config() -> tuple[Optional[dict], Optional[str]]:
+    """The configuration file's contents, or the one problem that stops it from loading."""
     if not CONFIG_PATH.exists():
-        typer.echo(f"Configuration file not found at: {CONFIG_PATH}")
-        typer.echo("Create it with 'v-flow make-config'.")
-        raise typer.Exit(code=1)
+        return None, (
+            f"Configuration file not found at: {CONFIG_PATH}. "
+            "Create it with 'v-flow make-config'."
+        )
 
     try:
         with CONFIG_PATH.open("r") as config_file:
             loaded = yaml.safe_load(config_file)
-    except yaml.YAMLError as error:
-        typer.echo(f"Error parsing configuration file: {error}", err=True)
-        raise typer.Exit(code=1)
+    except (OSError, yaml.YAMLError) as error:
+        return None, f"Error parsing configuration file: {error}"
 
     if not isinstance(loaded, dict):
-        typer.echo("Configuration file must contain a YAML dictionary.", err=True)
-        raise typer.Exit(code=1)
+        return None, "Configuration file must contain a YAML dictionary."
+    return loaded, None
 
-    locations = loaded.get("locations")
+
+def config_problems(app_config: dict) -> list[str]:
+    """What a parsed configuration still needs before any command can run."""
+    locations = app_config.get("locations")
     if not isinstance(locations, dict):
-        typer.echo("Configuration file must contain a 'locations' dictionary.", err=True)
-        raise typer.Exit(code=1)
+        return ["Configuration file must contain a 'locations' dictionary."]
 
+    problems = []
     missing_roles = [role for role in ("archive", "exports") if not locations.get(role)]
     if missing_roles:
-        typer.echo(
-            "Configuration is missing storage role(s): " + ", ".join(missing_roles),
-            err=True,
+        problems.append(
+            "Configuration is missing storage role(s): " + ", ".join(missing_roles)
         )
-        raise typer.Exit(code=1)
 
     working = locations.get("working")
     if not isinstance(working, dict) or not working:
-        typer.echo(
-            "Configuration must contain at least one named location under 'locations.working'.",
-            err=True,
+        problems.append(
+            "Configuration must contain at least one named location under 'locations.working'."
         )
+    return problems
+
+
+def load_config() -> dict:
+    """Load role-based storage configuration."""
+    loaded, problem = parse_config()
+    if problem is not None:
+        typer.echo(problem, err=True)
+        raise typer.Exit(code=1)
+
+    problems = config_problems(loaded)
+    if problems:
+        for text in problems:
+            typer.echo(text, err=True)
         raise typer.Exit(code=1)
 
     return loaded

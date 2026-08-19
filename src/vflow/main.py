@@ -6,6 +6,7 @@ from . import config
 from . import prompts
 from .checkout_service import checkout_shoot, report_checkout
 from .cleanup_service import delete_working_copy, prepare_cleanup, report_cleanup
+from .doctor_service import diagnose, report_doctor
 from .export_archive import archive_export, report_archive
 from .finish_service import finish_project, report_finish
 from .index_service import index_archive, report_index
@@ -620,6 +621,22 @@ def copy_meta(
     typer.echo(f"Copying metadata from '{source_folder}' to '{target_folder}'...")
     actions.copy_metadata_folder(source_folder, target_folder)
 
+
+
+@app.command()
+def doctor():
+    """Check the whole environment and say what works and what to fix.
+
+    Doctor reads configuration, storage, and the Resolve connection, writes nothing,
+    and asks nothing. It exits 0 when everything an ingest needs passes, and 1 when a
+    line marked [fail] names something to fix first. Informational lines describe what
+    a later command will need, and an unplugged drive is reported as unavailable rather
+    than worked around.
+    """
+    result = diagnose()
+    report_doctor(result)
+    if not result["ready"]:
+        raise typer.Exit(code=1)
 
 
 @app.command()
