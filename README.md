@@ -18,7 +18,7 @@ That installs the `v-flow` command plus the agent skill. Claude Code and Cowork 
 
 ```
 /plugin marketplace add kaungzinye/v-flow
-/plugin install vflow@v-flow
+/plugin install v-flow@v-flow
 ```
 
 Then point it at your drives:
