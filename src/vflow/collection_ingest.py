@@ -18,7 +18,9 @@ from .shoot_manifest import (
     manifest_source,
     place_verified,
     relative_path,
+    resolve_unindexed,
     safe_identity,
+    scan_unindexed,
     shoot_directory,
     write_json_atomically,
 )
@@ -142,6 +144,7 @@ def ingest_photos(
     collections = {collection_path: primary}
 
     index = build_checksum_index(archive, "photo")
+    unindexed = scan_unindexed(archive, "photo", skip=[collection_path])
     recorded = {
         (entry.get("batch_id"), entry.get("source_relative_path")): entry
         for entry in manifest["files"]
@@ -258,12 +261,16 @@ def ingest_photos(
 
         if stored is None:
             known = index.get(byte_size, {})
-            if known:
+            if known or unindexed.get(byte_size):
                 source_checksum = checksum(source_file)
                 existing = known.get(source_checksum)
                 if existing is not None and not (archive / existing).is_file():
                     known.pop(source_checksum, None)
                     existing = None
+                if existing is None:
+                    existing = resolve_unindexed(
+                        archive, unindexed, index, byte_size, source_checksum, "photo"
+                    )
                 if existing is not None:
                     manifest["deduplicated"] = [
                         item
