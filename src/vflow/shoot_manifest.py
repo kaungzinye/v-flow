@@ -53,9 +53,12 @@ FOOTAGE_EXTENSIONS = frozenset().union(*FOOTAGE_EXTENSION_GROUPS.values())
 # real work, so they ride into the Collection beside the frame they belong to.
 PHOTO_EXTENSION_GROUPS = {
     "raw": {".arw", ".cr2", ".cr3", ".nef", ".dng", ".orf", ".rw2"},
+    "compressed": {".jpg", ".jpeg", ".heic"},
     "sidecar": {".pp3", ".xmp"},
 }
-PHOTO_EXTENSIONS = frozenset(PHOTO_EXTENSION_GROUPS["raw"])
+PHOTO_EXTENSIONS = frozenset(
+    PHOTO_EXTENSION_GROUPS["raw"] | PHOTO_EXTENSION_GROUPS["compressed"]
+)
 SIDECAR_EXTENSIONS = frozenset(PHOTO_EXTENSION_GROUPS["sidecar"])
 
 
