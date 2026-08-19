@@ -21,13 +21,14 @@ def ingest(
     import_batch: str = typer.Option(None, "--import-batch", help="Stable Import Batch identity. By default, v-flow derives one from the source hierarchy and content."),
     auto: bool = typer.Option(False, "--auto", "-a", help="Automatically infer shoot folder name from file dates. Creates date range if spanning multiple days."),
     files: list[str] = typer.Option(None, "--files", help="Optional: Specific filenames, patterns, or ranges to ingest (e.g., 'C3317' or 'C3317-C3351'). Can specify multiple times. If omitted, ingests all files."),
+    include_all: bool = typer.Option(False, "--include-all", help="Also preserve non-footage card files inside a hidden folder in the Shoot."),
 ):
     """
-    Archives a camera card or source folder as an immutable Import Batch.
+    Copies footage from a camera card or source folder into a flat Shoot folder.
 
-    The received hierarchy and companion files remain intact. A SHA-256 manifest
-    proves every archived file. Ingest leaves the source untouched and does not
-    create a Working Copy.
+    Footage lands directly in Video/RAW/<shoot>. A hidden SHA-256 manifest records
+    every archived file, its card path, exclusions, and deduplicated clips. Ingest
+    leaves the source untouched and creates no Working Copy.
     """
     if not auto and not shoot:
         typer.echo("Either --shoot or --auto must be provided.", err=True)
@@ -46,6 +47,7 @@ def ingest(
         auto=auto,
         files_filter=files,
         import_batch_id=import_batch,
+        include_all=include_all,
     )
 
 
@@ -61,7 +63,7 @@ def checkout(
     direct_archive_access: bool = typer.Option(
         False,
         "--direct-archive-access",
-        help="Use the archived Camera Originals in place and create no Working Copy.",
+        help="Use the archived Shoot folder in place and create no Working Copy.",
     ),
     dry_run: bool = typer.Option(
         False,

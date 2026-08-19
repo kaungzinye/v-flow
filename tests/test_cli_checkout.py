@@ -53,7 +53,7 @@ def _ingest(tmp_path: Path) -> None:
     source_a = tmp_path / "card-a"
     source_b = tmp_path / "card-b"
     _write(source_a / "CLIP" / "A001.MP4", b"camera-original")
-    _write(source_a / "CLIP" / "A001.XML", b"sidecar")
+    _write(source_a / "CLIP" / "A002.MP4", b"camera-original-two")
     _write(source_b / "CLIP" / "A001.MP4", b"second-card")
     for source, batch in ((source_a, "card-a"), (source_b, "card-b")):
         result = runner.invoke(
@@ -79,9 +79,14 @@ def test_ssd_checkout_dry_run_then_creates_verified_working_copy(tmp_path, monke
     assert result.exit_code == 0, result.output
     assert "Checkout complete: 3 copied, 0 already verified, 3 total" in result.output
     working = locations["work_ssd"] / "Shoot"
-    assert (working / "card-a" / "contents" / "CLIP" / "A001.MP4").read_bytes() == b"camera-original"
-    assert (working / "card-a" / "contents" / "CLIP" / "A001.XML").read_bytes() == b"sidecar"
-    assert (working / "card-b" / "contents" / "CLIP" / "A001.MP4").read_bytes() == b"second-card"
+    assert sorted(path.name for path in working.iterdir()) == [
+        "A001.MP4",
+        "A001_b.MP4",
+        "A002.MP4",
+    ]
+    assert (working / "A001.MP4").read_bytes() == b"camera-original"
+    assert (working / "A002.MP4").read_bytes() == b"camera-original-two"
+    assert (working / "A001_b.MP4").read_bytes() == b"second-card"
 
 
 def test_laptop_checkout_previews_capacity_and_reuses_verified_files(tmp_path, monkeypatch):
@@ -160,7 +165,7 @@ def test_interrupted_checkout_retries_and_reuses_verified_files(tmp_path, monkey
 def test_checkout_conflict_stops_without_overwriting_content(tmp_path, monkeypatch):
     locations = _configure(tmp_path, monkeypatch)
     _ingest(tmp_path)
-    conflict = locations["work_ssd"] / "Shoot" / "card-b" / "contents" / "CLIP" / "A001.MP4"
+    conflict = locations["work_ssd"] / "Shoot" / "A001_b.MP4"
     _write(conflict, b"different-content")
 
     result = runner.invoke(
@@ -171,7 +176,7 @@ def test_checkout_conflict_stops_without_overwriting_content(tmp_path, monkeypat
     assert result.exit_code == 1
     assert "Working Copy conflict" in result.output
     assert conflict.read_bytes() == b"different-content"
-    assert not (locations["work_ssd"] / "Shoot" / "card-a").exists()
+    assert not (locations["work_ssd"] / "Shoot" / "A001.MP4").exists()
 
 
 def test_direct_archive_access_reports_source_and_creates_no_working_copy(tmp_path, monkeypatch):
@@ -185,9 +190,8 @@ def test_direct_archive_access_reports_source_and_creates_no_working_copy(tmp_pa
 
     assert result.exit_code == 0, result.output
     assert "Direct Archive Access" in result.output
-    assert f"Archived Shoot: {locations['archive'] / 'Camera Originals' / 'Shoot'}" in result.output
-    assert f"Archived source: {locations['archive'] / 'Camera Originals' / 'Shoot' / 'card-a' / 'contents'}" in result.output
-    assert f"Archived source: {locations['archive'] / 'Camera Originals' / 'Shoot' / 'card-b' / 'contents'}" in result.output
+    assert f"Archived Shoot: {locations['archive'] / 'Video' / 'RAW' / 'Shoot'}" in result.output
+    assert "Files available: 3" in result.output
     assert "Working Copy created: no" in result.output
     assert list(locations["laptop"].rglob("*")) == []
     assert list(locations["work_ssd"].rglob("*")) == []

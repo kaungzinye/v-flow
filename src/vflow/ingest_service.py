@@ -13,7 +13,7 @@ from .core.date_utils import (
 )
 from .core.fs_ops import copy_and_verify
 from .core.patterns import _extract_number_from_filename, _matches_pattern
-from .import_batch import ingest_import_batch
+from .card_ingest import ingest_card
 
 
 def _get_media_date(file_path: Path) -> datetime:
@@ -252,8 +252,9 @@ def ingest_shoot(
     auto: bool = False,
     files_filter: Optional[list[str]] = None,
     import_batch_id: Optional[str] = None,
+    include_all: bool = False,
 ) -> None:
-    """Archive a source hierarchy as one immutable, checksum-verified Import Batch."""
+    """Copy footage from one card into a flat, checksum-verified Shoot folder."""
     source_path = Path(source_dir)
     if not source_path.exists() or not source_path.is_dir():
         typer.echo(f"Source directory not found: {source_path}", err=True)
@@ -290,18 +291,29 @@ def ingest_shoot(
         typer.echo("Shoot name is required when --auto is not used.", err=True)
         raise typer.Exit(code=1)
 
-    typer.echo(f"Archiving source hierarchy as Shoot '{target_shoot_name}'...")
-    result = ingest_import_batch(
-        source=source_path,
-        archive=archive_dest,
-        shoot_id=target_shoot_name,
-        import_batch_id=import_batch_id,
-        selected_files=selected_files,
-    )
+    typer.echo(f"Archiving footage into Shoot '{target_shoot_name}'...")
+    try:
+        result = ingest_card(
+            source=source_path,
+            archive=archive_dest,
+            shoot=target_shoot_name,
+            batch_id=import_batch_id,
+            selected_files=selected_files,
+            include_all=include_all,
+        )
+    except (OSError, ValueError) as error:
+        typer.echo(f"Ingest failed: {error}", err=True)
+        typer.echo(
+            "Verified Archive files remain intact; retry the same ingest to resume.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    typer.echo(f"Shoot folder: {result['shoot_directory']}")
     typer.echo(
-        f"Import Batch '{result['import_batch_id']}': "
-        f"{result['copied']} copied, {result['skipped']} already verified, "
-        f"{result['files']} total."
+        f"Import Batch '{result['batch_id']}': "
+        f"{result['copied']} copied, {result['verified']} already verified, "
+        f"{result['deduplicated']} deduplicated, {result['excluded']} excluded, "
+        f"{result['files']} in Shoot."
     )
     typer.echo(f"Manifest: {result['manifest_path']}")
     typer.echo("Retained copies: 1 (Archive only). The source remains untouched.")
