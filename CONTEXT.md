@@ -17,8 +17,12 @@ The footage received from one camera card or source folder during a single inges
 _Avoid_: Batch folder, card folder
 
 **Shoot Manifest**:
-The hidden `.vflow-manifest.json` inside a Shoot folder. It records the checksum algorithm and, per file, its name, byte size, checksum, card-relative path, Import Batch, and ingest time, plus the files excluded or deduplicated during ingest.
+The hidden `.vflow-manifest.json` inside a Shoot or Collection folder. It records the checksum algorithm and, per file, its name, byte size, checksum, card-relative path, Import Batch, and ingest time, plus the files excluded or deduplicated during ingest.
 _Avoid_: Sidecar, index
+
+**Collection**:
+A freely named group of photos held as one flat folder under `Photo/RAW`, together with their editing sidecars and a Shoot Manifest. Collections are named by event or trip, are independent of footage Shoots, and are never renamed by v-flow.
+_Avoid_: Photo shoot, album, day folder
 
 **Camera Original**:
 Unmodified source media together with its companion metadata, audio, proxy, and sidecar files.
