@@ -14,5 +14,4 @@ build/
 
 # IDE / user-specific
 UserSystem/
-CLAUDE.local.md
 .test-venv/
