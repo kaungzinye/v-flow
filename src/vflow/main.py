@@ -540,11 +540,11 @@ def verify_backup_cmd(
 
 @app.command("list-backups")
 def list_backups_cmd(
-    subpath: str = typer.Option(
-        "Video/RAW/Desktop_Ingest",
+    subpath: Optional[str] = typer.Option(
+        None,
         "--subpath",
         "-p",
-        help="Subpath under archive root to scan for backups (e.g., 'Video/RAW/Desktop_Ingest').",
+        help="Subpath under archive root to scan for backups. Defaults to 'Desktop_Ingest' under the footage root.",
     ),
 ):
     """
@@ -554,7 +554,8 @@ def list_backups_cmd(
     """
     app_config = config.load_config()
     archive_hdd_dest = config.get_location(app_config, "archive")
-    actions.list_backups(archive_hdd_dest, subpath)
+    footage_root = "/".join(config.get_layout(app_config)["video"])
+    actions.list_backups(archive_hdd_dest, subpath or f"{footage_root}/Desktop_Ingest")
 
 
 @app.command("restore-folder")

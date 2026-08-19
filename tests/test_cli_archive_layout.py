@@ -215,3 +215,13 @@ def test_checkout_reads_the_shoot_from_the_configured_root(tmp_path, monkeypatch
 
     assert result.exit_code == 0, result.output
     assert (tmp_path / "laptop" / "Stockholm" / "C0001.MP4").read_bytes() == b"clip-one"
+
+
+def test_list_backups_defaults_under_the_configured_footage_root(tmp_path, monkeypatch):
+    archive = _configure(tmp_path, monkeypatch, CUSTOM_LAYOUT)
+    _write(archive / "Media" / "Footage" / "Desktop_Ingest" / "Trip" / "C0001.MP4", b"clip")
+
+    result = runner.invoke(app, ["list-backups"])
+
+    assert result.exit_code == 0, result.output
+    assert "Trip" in result.output
