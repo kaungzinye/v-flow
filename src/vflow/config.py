@@ -4,10 +4,17 @@ from typing import Any, Optional
 import typer
 import yaml
 
+from .shoot_manifest import safe_subpath
+
 
 CONFIG_PATH = Path.home() / ".vflow_config.yml"
 CONFIG_VERSION = 2
 DEFAULT_LAPTOP_FREE_SPACE_RESERVE_GB = 50
+
+# Where each media kind's flat folders sit under the Archive. A 'layout' section
+# in the config file overrides a key; an absent section or key keeps the default.
+DEFAULT_LAYOUT = {"footage_raw": "Video/RAW", "photo_raw": "Photo/RAW"}
+LAYOUT_KEYS = {"video": "footage_raw", "photo": "photo_raw"}
 
 
 def load_config() -> dict:
@@ -76,6 +83,28 @@ def get_location(app_config: dict, name: str) -> Path:
         typer.echo(f"Location '{name}' is unavailable: {path}", err=True)
         raise typer.Exit(code=1)
     return path
+
+
+def configured_layout(app_config: dict) -> dict[str, str]:
+    """The layout subpath configured for each layout key, defaults filling the gaps."""
+    section = app_config.get("layout") or {}
+    if not isinstance(section, dict):
+        typer.echo("Configuration 'layout' must be a dictionary.", err=True)
+        raise typer.Exit(code=1)
+    return {key: section.get(key, default) for key, default in DEFAULT_LAYOUT.items()}
+
+
+def get_layout(app_config: dict) -> dict[str, tuple[str, ...]]:
+    """Archive subpath segments per media kind, validated to stay inside the Archive."""
+    configured = configured_layout(app_config)
+    layout: dict[str, tuple[str, ...]] = {}
+    for kind, key in LAYOUT_KEYS.items():
+        try:
+            layout[kind] = safe_subpath(configured[key], f"layout.{key}")
+        except ValueError as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=1)
+    return layout
 
 
 def get_setting(app_config: dict, key: str, default: Any = None) -> Any:

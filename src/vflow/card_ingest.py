@@ -8,6 +8,7 @@ from typing import Optional
 from .shoot_manifest import (
     EXTRAS_DIRECTORY,
     FOOTAGE_EXTENSIONS,
+    Layout,
     MANIFEST_NAME,
     PENDING_MANIFEST_NAME,
     batch_identity,
@@ -54,6 +55,7 @@ def ingest_card(
     batch_id: Optional[str] = None,
     selected_files: Optional[list[Path]] = None,
     include_all: bool = False,
+    layout: Optional[Layout] = None,
 ) -> dict:
     """Copy footage from one card into a flat Shoot folder backed by a hidden manifest."""
     shoot = safe_identity(shoot, "Shoot identity")
@@ -76,14 +78,14 @@ def ingest_card(
         "Import Batch identity",
     )
 
-    shoot_path = shoot_directory(archive, shoot)
+    shoot_path = shoot_directory(archive, shoot, layout=layout)
     shoot_path.mkdir(parents=True, exist_ok=True)
     manifest_path = shoot_path / MANIFEST_NAME
     pending_path = shoot_path / PENDING_MANIFEST_NAME
     manifest = load_manifest(shoot_path, shoot)
 
-    index = build_checksum_index(archive)
-    unindexed = scan_unindexed(archive, "video", skip=[shoot_path])
+    index = build_checksum_index(archive, layout=layout)
+    unindexed = scan_unindexed(archive, "video", skip=[shoot_path], layout=layout)
     recorded = {
         (entry.get("batch_id"), entry.get("source_relative_path")): entry
         for entry in manifest["files"]

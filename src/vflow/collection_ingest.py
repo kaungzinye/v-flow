@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from .shoot_manifest import (
+    Layout,
     MANIFEST_NAME,
     PENDING_MANIFEST_NAME,
     PHOTO_EXTENSIONS,
@@ -116,6 +117,7 @@ def ingest_photos(
     collection: str,
     batch_id: Optional[str] = None,
     selected_files: Optional[list[Path]] = None,
+    layout: Optional[Layout] = None,
 ) -> dict:
     """Copy RAW photos and their editing sidecars into a flat Collection folder."""
     collection = safe_identity(collection, "Collection identity")
@@ -145,7 +147,7 @@ def ingest_photos(
         "Import Batch identity",
     )
 
-    collection_path = shoot_directory(archive, collection, "photo")
+    collection_path = shoot_directory(archive, collection, "photo", layout=layout)
     collection_path.mkdir(parents=True, exist_ok=True)
     manifest_path = collection_path / MANIFEST_NAME
     pending_path = collection_path / PENDING_MANIFEST_NAME
@@ -153,8 +155,8 @@ def ingest_photos(
     primary = _Collection(collection_path, manifest, pending_path)
     collections = {collection_path: primary}
 
-    index = build_checksum_index(archive, "photo")
-    unindexed = scan_unindexed(archive, "photo", skip=[collection_path])
+    index = build_checksum_index(archive, "photo", layout=layout)
+    unindexed = scan_unindexed(archive, "photo", skip=[collection_path], layout=layout)
     recorded = {
         (entry.get("batch_id"), entry.get("source_relative_path")): entry
         for entry in manifest["files"]

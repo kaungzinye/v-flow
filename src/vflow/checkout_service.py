@@ -10,6 +10,7 @@ import typer
 from . import config
 from .core.fs_ops import _format_bytes
 from .shoot_manifest import (
+    Layout,
     MANIFEST_NAME,
     checksum as _checksum,
     read_manifest,
@@ -19,9 +20,11 @@ from .shoot_manifest import (
 )
 
 
-def _load_checkout_entries(archive: Path, shoot_id: str) -> tuple[Path, list[dict]]:
+def _load_checkout_entries(
+    archive: Path, shoot_id: str, layout: Optional[Layout] = None
+) -> tuple[Path, list[dict]]:
     shoot_id = _safe_identity(shoot_id, "Shoot identity")
-    shoot_path = shoot_directory(archive, shoot_id)
+    shoot_path = shoot_directory(archive, shoot_id, layout=layout)
     if not shoot_path.exists() or not shoot_path.is_dir():
         raise ValueError(f"Shoot '{shoot_id}' is not present in the Archive: {shoot_path}")
 
@@ -166,7 +169,9 @@ def checkout_shoot(
             "Choose exactly one mode: --working-location <name> or --direct-archive-access"
         )
 
-    shoot_path, entries = _load_checkout_entries(archive, shoot_id)
+    shoot_path, entries = _load_checkout_entries(
+        archive, shoot_id, config.get_layout(app_config)
+    )
     if direct_archive_access:
         return {
             "mode": "direct",

@@ -10,6 +10,7 @@ from .finish_service import finish_project, report_finish
 from .index_service import index_archive, report_index
 from .resolve_adapter import ResolveUnavailableError, get_resolve_adapter
 from .restore_service import report_restore, restore_archive_asset
+from .shoot_manifest import safe_subpath
 
 app = typer.Typer()
 
@@ -19,7 +20,7 @@ from . import actions
 def ingest(
     source: str = typer.Option(..., "--source", "-s", help="Camera card or source folder to copy footage and photos from."),
     shoot: str = typer.Option(None, "--shoot", "-n", help="Name of the shoot (e.g., '2025-09-15_Stockholm_Broll'). Optional if --auto is used."),
-    collection: str = typer.Option(None, "--collection", "-c", help="Name of the photo Collection in Photo/RAW. Defaults to the Shoot name."),
+    collection: str = typer.Option(None, "--collection", "-c", help="Name of the photo Collection under the photo root. Defaults to the Shoot name."),
     import_batch: str = typer.Option(None, "--import-batch", help="Stable Import Batch identity. By default, v-flow derives one from the source name, card paths, and file sizes."),
     auto: bool = typer.Option(False, "--auto", "-a", help="Automatically infer the Shoot and Collection name from file dates. Creates date range if spanning multiple days."),
     files: list[str] = typer.Option(None, "--files", help="Optional: Specific filenames, patterns, or ranges to ingest (e.g., 'C3317' or 'DSC00811-DSC00842'). Can specify multiple times. If omitted, ingests all files."),
@@ -28,8 +29,9 @@ def ingest(
     """
     Copies one card's footage into a flat Shoot and its photos into a flat Collection.
 
-    Footage lands in Video/RAW/<shoot> and photos in Photo/RAW/<collection>, which carries
-    the Shoot name unless --collection names it. A card without footage creates no Shoot, and
+    Footage lands in Video/RAW/<shoot> and photos in Photo/RAW/<collection> by default, and
+    'v-flow set layout.footage_raw' moves either root. The Collection carries the Shoot name
+    unless --collection names it. A card without footage creates no Shoot, and
     a card without photos creates no Collection. Editing sidecars (.pp3, .xmp) ride beside
     the photo they belong to, including when --files selects the photo.
 
@@ -57,6 +59,7 @@ def ingest(
         files_filter=files,
         import_batch_id=import_batch,
         include_all=include_all,
+        layout=config.get_layout(app_config),
     )
 
 
@@ -82,9 +85,9 @@ def index(
 ):
     """Give existing folders a complete Shoot Manifest by hashing them in place.
 
-    Indexing walks flat folders under Video/RAW and Photo/RAW, hashes every file a
-    manifest does not cover yet, and writes the checksums into the folder's hidden
-    Shoot Manifest. It is purely additive: nothing moves, nothing is renamed, and the
+    Indexing walks the flat folders under the configured footage and photo roots, Video/RAW
+    and Photo/RAW by default, hashes every file a manifest does not cover yet, and writes
+    the checksums into the folder's hidden Shoot Manifest. It is purely additive: nothing moves, nothing is renamed, and the
     folder's visible contents stay byte-for-byte identical. A Partial Shoot Manifest
     left by ingest is completed rather than recomputed, and an interrupted run resumes
     where it stopped. Indexing runs only when you ask for it; v-flow never schedules it.
@@ -97,6 +100,7 @@ def index(
             names=folder or [],
             all_folders=all_folders,
             dry_run=dry_run,
+            layout=config.get_layout(app_config),
         )
     except (OSError, ValueError) as error:
         typer.echo(str(error), err=True)
@@ -193,7 +197,14 @@ def ingest_report_cmd(
     app_config = config.load_config()
     archive_dest = config.get_location(app_config, "archive")
     laptop_dest = config.get_location(app_config, "laptop")
-    actions.ingest_report(source, archive_dest, laptop_path=laptop_dest, priority_day=priority_day, priority_month=priority_month)
+    actions.ingest_report(
+        source,
+        archive_dest,
+        laptop_path=laptop_dest,
+        priority_day=priority_day,
+        priority_month=priority_month,
+        layout=config.get_layout(app_config),
+    )
 
 @app.command("card-report")
 def card_report_cmd(
@@ -208,25 +219,30 @@ def card_report_cmd(
     """
     app_config = config.load_config()
     archive_dest = config.get_location(app_config, "archive")
-    actions.card_report(source, archive_dest)
+    actions.card_report(source, archive_dest, layout=config.get_layout(app_config))
 
 
 @app.command("card-verify")
 def card_verify_cmd(
     source: str = typer.Option(..., "--source", "-s", help="Card root directory (e.g., '/Volumes/Untitled')."),
-    photo_shoot: Optional[str] = typer.Option(None, "--photo-shoot", help="Name of the photo shoot in Photo/RAW to verify photos against (required if card has photos)."),
+    photo_shoot: Optional[str] = typer.Option(None, "--photo-shoot", help="Name of the photo Collection to verify photos against (required if card has photos)."),
 ):
     """
     Verifies card contents are safely in the archive before formatting.
 
-    Videos are checked archive-wide (Video/RAW) by name+size.
-    Photos are checked against a specific shoot folder only (Photo/RAW/<photo-shoot>),
+    Videos are checked across the whole footage root by name+size.
+    Photos are checked against the one named Collection only,
     avoiding Sony filename-recycling false positives across shoots.
     Reports PASS or FAIL separately for videos and photos.
     """
     app_config = config.load_config()
     archive_dest = config.get_location(app_config, "archive")
-    actions.card_verify(source, archive_dest, photo_shoot=photo_shoot)
+    actions.card_verify(
+        source,
+        archive_dest,
+        photo_shoot=photo_shoot,
+        layout=config.get_layout(app_config),
+    )
 
 
 @app.command("list-duplicates")
@@ -267,8 +283,10 @@ def list_duplicates_cmd(
             typer.echo("")
 
     if location in ("archive", "both"):
-        archive_raw = archive_dest / "Video" / "RAW"
-        report_duplicates("ARCHIVE (Video/RAW)", archive_raw)
+        footage_root = config.get_layout(app_config)["video"]
+        report_duplicates(
+            f"ARCHIVE ({'/'.join(footage_root)})", archive_dest.joinpath(*footage_root)
+        )
     if location in ("laptop", "both"):
         report_duplicates("LAPTOP (Ingest)", laptop_dest)
     if location not in ("archive", "laptop", "both"):
@@ -608,6 +626,10 @@ def locations():
             if path:
                 typer.echo(f"  {name}: {path} [{config.location_status(path)}]")
 
+    typer.echo("Archive layout:")
+    for key, subpath in config.configured_layout(app_config).items():
+        typer.echo(f"  {key}: {subpath}")
+
     if settings:
         typer.echo("Settings:")
         for key, val in settings.items():
@@ -616,7 +638,7 @@ def locations():
 
 @app.command("set")
 def set_config(
-    key: str = typer.Argument(help="Config key: archive, exports, working.<name>, or settings.<name>."),
+    key: str = typer.Argument(help="Config key: archive, exports, working.<name>, layout.<name>, or settings.<name>."),
     value: str = typer.Argument(help="New value for the key."),
 ):
     """Update a single config value without re-running setup.
@@ -625,6 +647,7 @@ def set_config(
       v-flow set archive "/Volumes/Archive/Media"
       v-flow set exports "/Volumes/Work/Exports"
       v-flow set working.travel_ssd "/Volumes/Travel/Working Copies"
+      v-flow set layout.footage_raw "Video/RAW"
     """
     app_config = config.load_config()
 
@@ -635,13 +658,23 @@ def set_config(
         working_name = key[len("working."):]
         app_config.setdefault("locations", {}).setdefault("working", {})[working_name] = value
         typer.echo(f"Set locations.working.{working_name} = {value}")
+    elif key.startswith("layout.") and key[len("layout."):] in config.DEFAULT_LAYOUT:
+        layout_key = key[len("layout."):]
+        try:
+            safe_subpath(value, key)
+        except ValueError as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=1)
+        app_config.setdefault("layout", {})[layout_key] = value
+        typer.echo(f"Set layout.{layout_key} = {value}")
     elif key.startswith("settings."):
         setting_key = key[len("settings."):]
         app_config.setdefault("settings", {})[setting_key] = value
         typer.echo(f"Set settings.{setting_key} = {value}")
     else:
         typer.echo(
-            f"Unknown key '{key}'. Use archive, exports, working.<name>, or settings.<name>.",
+            f"Unknown key '{key}'. Use archive, exports, working.<name>, "
+            "layout.footage_raw, layout.photo_raw, or settings.<name>.",
             err=True,
         )
         raise typer.Exit(code=1)

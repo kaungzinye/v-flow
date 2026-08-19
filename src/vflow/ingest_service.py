@@ -13,7 +13,7 @@ from .core.date_utils import (
 from .core.patterns import _extract_number_from_filename, _matches_pattern
 from .card_ingest import holds_footage, ingest_card
 from .collection_ingest import holds_photos, ingest_photos
-from .shoot_manifest import PHOTO_EXTENSIONS
+from .shoot_manifest import Layout, PHOTO_EXTENSIONS, raw_root
 
 
 def _get_media_date(file_path: Path) -> datetime:
@@ -31,7 +31,9 @@ def _get_media_date(file_path: Path) -> datetime:
         return datetime.now()
 
 
-def _find_existing_shoots(laptop_dest: Path, archive_dest: Path) -> dict:
+def _find_existing_shoots(
+    laptop_dest: Path, archive_dest: Path, layout: Optional[Layout] = None
+) -> dict:
     """
     Find all existing shoots and their date ranges, tracking where they exist.
     Returns a dict mapping shoot_name -> {
@@ -53,7 +55,7 @@ def _find_existing_shoots(laptop_dest: Path, archive_dest: Path) -> dict:
                         "in_archive": False,
                     }
 
-    archive_raw = archive_dest / "Video" / "RAW"
+    archive_raw = raw_root(archive_dest, "video", layout)
     if archive_raw.exists():
         for shoot_dir in archive_raw.iterdir():
             if shoot_dir.is_dir():
@@ -90,6 +92,7 @@ def ingest_report(
     laptop_path: Optional[Path] = None,
     priority_day: Optional[int] = None,
     priority_month: Optional[int] = None,
+    layout: Optional[Layout] = None,
 ) -> None:
     """
     Scans SD card (or source) for video files, compares against BOTH laptop ingest
@@ -131,7 +134,7 @@ def ingest_report(
                 except (OSError, FileNotFoundError):
                     pass
 
-    archive_raw = archive_path / "Video" / "RAW"
+    archive_raw = raw_root(archive_path, "video", layout)
     archive_index: set[tuple[str, int]] = set()
     if archive_raw.exists():
         for f in archive_raw.rglob("*"):
@@ -273,6 +276,7 @@ def ingest_media(
     files_filter: Optional[list[str]] = None,
     import_batch_id: Optional[str] = None,
     include_all: bool = False,
+    layout: Optional[Layout] = None,
 ) -> None:
     """Copy one card's footage into a flat Shoot and its photos into a flat Collection."""
     source_path = Path(source_dir)
@@ -330,6 +334,7 @@ def ingest_media(
                 batch_id=import_batch_id,
                 selected_files=selected_files,
                 include_all=include_all,
+                layout=layout,
             )
         except (OSError, ValueError) as error:
             raise _abort(error)
@@ -345,6 +350,7 @@ def ingest_media(
                 collection=target_collection_name,
                 batch_id=import_batch_id,
                 selected_files=selected_files,
+                layout=layout,
             )
         except (OSError, ValueError) as error:
             raise _abort(error)
@@ -357,6 +363,7 @@ def ingest_media(
 def card_report(
     source_dir: str,
     archive_path: Path,
+    layout: Optional[Layout] = None,
 ) -> None:
     """
     Reports what's on a card. Auto-detects video (private/M4ROOT/CLIP) and photo
@@ -380,7 +387,7 @@ def card_report(
     typer.echo(f"Card: {source_path}")
 
     # Build archive-wide video index for presence check
-    archive_video_raw = archive_path / "Video" / "RAW"
+    archive_video_raw = raw_root(archive_path, "video", layout)
     archive_video_index: set[tuple[str, int]] = set()
     if archive_video_raw.exists():
         for f in archive_video_raw.rglob("*"):

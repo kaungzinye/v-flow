@@ -8,7 +8,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from string import ascii_lowercase
-from typing import Iterable, Optional
+from typing import Iterable, Mapping, Optional
 
 
 CHECKSUM_ALGORITHM = "sha256"
@@ -22,8 +22,9 @@ CHUNK_SIZE = 1024 * 1024
 # an Import Batch.
 INDEXED_SOURCE = "indexed-in-place"
 
-# Where each media kind keeps its flat folders, and what the folder identity is
-# called inside a manifest.
+# Where each media kind keeps its flat folders by default, and what the folder
+# identity is called inside a manifest. A configured layout replaces the subpaths
+# and reaches this module as a mapping of the same shape.
 RAW_SUBPATHS = {"video": ("Video", "RAW"), "photo": ("Photo", "RAW")}
 IDENTITY_KEYS = {"video": "shoot", "photo": "collection"}
 RAW_SUBPATH = RAW_SUBPATHS["video"]
@@ -75,13 +76,23 @@ def thumbnail_reason(relative: Path) -> Optional[str]:
     return None
 
 
-def raw_root(archive: Path, kind: str = "video") -> Path:
-    """Directory holding every flat folder of one media kind."""
-    return archive.joinpath(*RAW_SUBPATHS[kind])
+Layout = Mapping[str, tuple[str, ...]]
 
 
-def shoot_directory(archive: Path, shoot: str, kind: str = "video") -> Path:
-    return raw_root(archive, kind) / shoot
+def raw_root(archive: Path, kind: str = "video", layout: Optional[Layout] = None) -> Path:
+    """Directory holding every flat folder of one media kind, under the layout in force."""
+    return archive.joinpath(*(layout or RAW_SUBPATHS)[kind])
+
+
+def raw_label(kind: str, layout: Optional[Layout] = None) -> str:
+    """The Archive-relative subpath of one media kind's root, for messages and help."""
+    return "/".join((layout or RAW_SUBPATHS)[kind])
+
+
+def shoot_directory(
+    archive: Path, shoot: str, kind: str = "video", layout: Optional[Layout] = None
+) -> Path:
+    return raw_root(archive, kind, layout) / shoot
 
 
 def checksum(path: Path, algorithm: str = CHECKSUM_ALGORITHM) -> str:
@@ -105,6 +116,18 @@ def safe_identity(value: str, label: str) -> str:
     ):
         raise ValueError(f"{label} must be one non-empty path segment")
     return value
+
+
+def safe_subpath(value: object, label: str) -> tuple[str, ...]:
+    """Segments of an Archive-relative subpath, refusing anything that leaves the Archive."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} must be a non-empty subpath under the Archive")
+    pure = PurePosixPath(value.replace("\\", "/"))
+    if pure.is_absolute() or not pure.parts or any(
+        part in {"", ".", ".."} or part != part.strip() for part in pure.parts
+    ):
+        raise ValueError(f"{label} must stay inside the Archive: {value}")
+    return pure.parts
 
 
 def relative_path(value: object) -> Path:
@@ -204,9 +227,11 @@ def uncovered_files(directory: Path, manifest: dict) -> list[tuple[str, int]]:
     return [pair for pair in folder_files(directory) if pair[0] not in covered]
 
 
-def iter_raw_folders(archive: Path, kind: str = "video") -> Iterable[Path]:
+def iter_raw_folders(
+    archive: Path, kind: str = "video", layout: Optional[Layout] = None
+) -> Iterable[Path]:
     """Every flat folder of one media kind under its RAW root."""
-    root = raw_root(archive, kind)
+    root = raw_root(archive, kind, layout)
     if not root.is_dir():
         return
     for path in sorted(root.iterdir()):
@@ -214,9 +239,11 @@ def iter_raw_folders(archive: Path, kind: str = "video") -> Iterable[Path]:
             yield path
 
 
-def iter_shoot_manifests(archive: Path, kind: str = "video") -> Iterable[tuple[Path, dict]]:
+def iter_shoot_manifests(
+    archive: Path, kind: str = "video", layout: Optional[Layout] = None
+) -> Iterable[tuple[Path, dict]]:
     """Yield (folder, manifest) for every folder of one media kind carrying a manifest."""
-    for shoot_path in iter_raw_folders(archive, kind):
+    for shoot_path in iter_raw_folders(archive, kind, layout):
         for name in (PENDING_MANIFEST_NAME, MANIFEST_NAME):
             manifest = read_manifest(shoot_path / name)
             if manifest is not None:
@@ -225,12 +252,15 @@ def iter_shoot_manifests(archive: Path, kind: str = "video") -> Iterable[tuple[P
 
 
 def scan_unindexed(
-    archive: Path, kind: str = "video", skip: Iterable[Path] = ()
+    archive: Path,
+    kind: str = "video",
+    skip: Iterable[Path] = (),
+    layout: Optional[Layout] = None,
 ) -> dict[int, list[Path]]:
     """Map byte size to the RAW-root files no manifest covers, from names and sizes only."""
     skipped = set(skip)
     sized: dict[int, list[Path]] = {}
-    for directory in iter_raw_folders(archive, kind):
+    for directory in iter_raw_folders(archive, kind, layout):
         if directory in skipped:
             continue
         manifest = load_manifest(directory, directory.name, kind)
@@ -301,10 +331,12 @@ def resolve_unindexed(
     return None
 
 
-def build_checksum_index(archive: Path, kind: str = "video") -> dict[int, dict[str, str]]:
+def build_checksum_index(
+    archive: Path, kind: str = "video", layout: Optional[Layout] = None
+) -> dict[int, dict[str, str]]:
     """Map byte size to checksum to archive-relative location, from folder manifests."""
     index: dict[int, dict[str, str]] = {}
-    for shoot_path, manifest in iter_shoot_manifests(archive, kind):
+    for shoot_path, manifest in iter_shoot_manifests(archive, kind, layout):
         for entry in manifest["files"]:
             if not isinstance(entry, dict):
                 continue
