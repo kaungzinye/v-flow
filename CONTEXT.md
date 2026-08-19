@@ -20,6 +20,10 @@ _Avoid_: Batch folder, card folder
 The hidden `.vflow-manifest.json` inside a Shoot or Collection folder. It records the checksum algorithm and, per file, its name, byte size, checksum, card-relative path, Import Batch, and ingest time, plus the files excluded or deduplicated during ingest.
 _Avoid_: Sidecar, index
 
+**Partial Shoot Manifest**:
+A Shoot Manifest marked `"partial": true`, holding checksums for some of its folder's files while the rest stay unrecorded. Ingest writes one when a size match on an unindexed folder makes it hash a candidate file, so that file is never hashed again.
+_Avoid_: Draft manifest, incomplete index
+
 **Collection**:
 A freely named group of photos held as one flat folder under `Photo/RAW`, together with their editing sidecars and a Shoot Manifest. Collections are named by event or trip, are independent of footage Shoots, and are never renamed by v-flow.
 _Avoid_: Photo shoot, album, day folder

@@ -17,7 +17,9 @@ from .shoot_manifest import (
     load_manifest,
     place_verified,
     relative_path,
+    resolve_unindexed,
     safe_identity,
+    scan_unindexed,
     shoot_directory,
     write_json_atomically,
 )
@@ -72,6 +74,7 @@ def ingest_card(
     manifest = load_manifest(shoot_path, shoot)
 
     index = build_checksum_index(archive)
+    unindexed = scan_unindexed(archive, "video", skip=[shoot_path])
     recorded = {
         (entry.get("batch_id"), entry.get("source_relative_path")): entry
         for entry in manifest["files"]
@@ -132,12 +135,16 @@ def ingest_card(
 
         known = index.get(byte_size, {})
         source_checksum: Optional[str] = None
-        if known:
+        if known or unindexed.get(byte_size):
             source_checksum = checksum(source_file)
             existing = known.get(source_checksum)
             if existing is not None and not (archive / existing).is_file():
                 known.pop(source_checksum, None)
                 existing = None
+            if existing is None:
+                existing = resolve_unindexed(
+                    archive, unindexed, index, byte_size, source_checksum, "video"
+                )
             if existing is not None:
                 manifest["deduplicated"] = [
                     item

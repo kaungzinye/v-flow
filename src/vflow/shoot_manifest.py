@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from string import ascii_lowercase
 from typing import Iterable, Optional
@@ -16,6 +17,10 @@ PENDING_MANIFEST_NAME = ".vflow-manifest.pending.json"
 MANIFEST_VERSION = 2
 EXTRAS_DIRECTORY = ".vflow-extras"
 CHUNK_SIZE = 1024 * 1024
+
+# Provenance for an entry hashed where it already sat, rather than copied in by
+# an Import Batch.
+INDEXED_SOURCE = "indexed-in-place"
 
 # Where each media kind keeps its flat folders, and what the folder identity is
 # called inside a manifest.
@@ -144,19 +149,140 @@ def write_json_atomically(path: Path, value: dict) -> None:
     os.replace(temporary, path)
 
 
-def iter_shoot_manifests(archive: Path, kind: str = "video") -> Iterable[tuple[Path, dict]]:
-    """Yield (folder, manifest) for every folder of one media kind carrying a manifest."""
+def is_partial(manifest: dict) -> bool:
+    """Whether a manifest covers only some of its folder's files."""
+    return bool(manifest.get("partial"))
+
+
+def covered_names(manifest: dict) -> set[str]:
+    """Folder file names the manifest already carries a checksum for."""
+    return {
+        entry["name"]
+        for entry in manifest["files"]
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+    }
+
+
+def folder_files(directory: Path) -> list[tuple[str, int]]:
+    """Visible file names and byte sizes in a flat folder, read by stat alone."""
+    found: list[tuple[str, int]] = []
+    try:
+        with os.scandir(directory) as scan:
+            for entry in scan:
+                if entry.name.startswith("."):
+                    continue
+                try:
+                    if not entry.is_file(follow_symlinks=False):
+                        continue
+                    found.append((entry.name, entry.stat(follow_symlinks=False).st_size))
+                except OSError:
+                    continue
+    except OSError:
+        return []
+    return sorted(found)
+
+
+def uncovered_files(directory: Path, manifest: dict) -> list[tuple[str, int]]:
+    """Visible files in a folder that its manifest carries no checksum for."""
+    covered = covered_names(manifest)
+    return [pair for pair in folder_files(directory) if pair[0] not in covered]
+
+
+def iter_raw_folders(archive: Path, kind: str = "video") -> Iterable[Path]:
+    """Every flat folder of one media kind under its RAW root."""
     root = raw_root(archive, kind)
     if not root.is_dir():
         return
-    for shoot_path in sorted(root.iterdir()):
-        if not shoot_path.is_dir():
+    for path in sorted(root.iterdir()):
+        if path.is_dir():
+            yield path
+
+
+def iter_shoot_manifests(archive: Path, kind: str = "video") -> Iterable[tuple[Path, dict]]:
+    """Yield (folder, manifest) for every folder of one media kind carrying a manifest."""
+    for shoot_path in iter_raw_folders(archive, kind):
+        for name in (PENDING_MANIFEST_NAME, MANIFEST_NAME):
+            manifest = read_manifest(shoot_path / name)
+            if manifest is not None:
+                yield shoot_path, manifest
+                break
+
+
+def scan_unindexed(
+    archive: Path, kind: str = "video", skip: Iterable[Path] = ()
+) -> dict[int, list[Path]]:
+    """Map byte size to the RAW-root files no manifest covers, from names and sizes only."""
+    skipped = set(skip)
+    sized: dict[int, list[Path]] = {}
+    for directory in iter_raw_folders(archive, kind):
+        if directory in skipped:
             continue
-        manifest = read_manifest(shoot_path / MANIFEST_NAME)
-        if manifest is None:
-            manifest = read_manifest(shoot_path / PENDING_MANIFEST_NAME)
-        if manifest is not None:
-            yield shoot_path, manifest
+        manifest = load_manifest(directory, directory.name, kind)
+        for name, byte_size in uncovered_files(directory, manifest):
+            sized.setdefault(byte_size, []).append(directory / name)
+    return sized
+
+
+def indexed_entry(path: Path) -> dict:
+    """Hash one file where it sits and describe it as indexed in place."""
+    return {
+        "name": path.name,
+        "byte_size": path.stat().st_size,
+        "checksum": checksum(path),
+        "source": INDEXED_SOURCE,
+        "indexed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def add_indexed_entry(directory: Path, manifest: dict, entry: dict) -> None:
+    """Fold one indexed entry into a manifest, marking it partial while files remain."""
+    manifest["files"] = [
+        item
+        for item in manifest["files"]
+        if not (isinstance(item, dict) and item.get("name") == entry["name"])
+    ]
+    manifest["files"].append(entry)
+    if uncovered_files(directory, manifest):
+        manifest["partial"] = True
+    else:
+        manifest.pop("partial", None)
+
+
+def index_file(path: Path, kind: str = "video") -> str:
+    """Hash one unindexed file and persist its checksum into its folder's manifest."""
+    directory = path.parent
+    manifest = load_manifest(directory, directory.name, kind)
+    entry = indexed_entry(path)
+    add_indexed_entry(directory, manifest, entry)
+    write_json_atomically(manifest_source(directory), manifest)
+    return entry["checksum"]
+
+
+def resolve_unindexed(
+    archive: Path,
+    sized: dict[int, list[Path]],
+    index: dict[int, dict[str, str]],
+    byte_size: int,
+    source_checksum: str,
+    kind: str = "video",
+) -> Optional[str]:
+    """Hash size-matched unindexed files one by one until one proves identical.
+
+    A size match is a tripwire, never a skip: every candidate it selects is hashed,
+    and the checksum lands in a manifest so no candidate is ever hashed twice.
+    """
+    candidates = sized.get(byte_size) or []
+    while candidates:
+        candidate = candidates.pop(0)
+        try:
+            candidate_checksum = index_file(candidate, kind)
+        except OSError:
+            continue
+        location = candidate.relative_to(archive).as_posix()
+        index.setdefault(byte_size, {}).setdefault(candidate_checksum, location)
+        if candidate_checksum == source_checksum:
+            return location
+    return None
 
 
 def build_checksum_index(archive: Path, kind: str = "video") -> dict[int, dict[str, str]]:
