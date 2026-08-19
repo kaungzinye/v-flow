@@ -360,3 +360,17 @@ def test_batch_identity_is_stable_across_retries(tmp_path, monkeypatch):
     manifest = _manifest(_shoot(archive, "Shoot"))
     assert len(manifest["files"]) == 1
     assert manifest["files"][0]["batch_id"].startswith("card-")
+
+
+def test_ingest_never_overwrites_an_existing_hand_made_file(tmp_path, monkeypatch):
+    archive, _ = _configure(tmp_path, monkeypatch)
+    shoot = _shoot(archive, "Shoot")
+    _write(shoot / "C0001.MP4", b"hand-placed")
+    source = tmp_path / "CARD"
+    _write(source / "C0001.MP4", b"from-the-card")
+
+    result = runner.invoke(app, ["ingest", "-s", str(source), "-n", "Shoot"])
+
+    assert result.exit_code == 0, result.output
+    assert (shoot / "C0001.MP4").read_bytes() == b"hand-placed"
+    assert (shoot / "C0001_b.MP4").read_bytes() == b"from-the-card"
