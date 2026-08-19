@@ -16,9 +16,9 @@ from . import actions
 
 @app.command()
 def ingest(
-    source: str = typer.Option(..., "--source", "-s", help="Camera card or source folder to preserve as received."),
+    source: str = typer.Option(..., "--source", "-s", help="Camera card or source folder to copy footage from."),
     shoot: str = typer.Option(None, "--shoot", "-n", help="Name of the shoot (e.g., '2025-09-15_Stockholm_Broll'). Optional if --auto is used."),
-    import_batch: str = typer.Option(None, "--import-batch", help="Stable Import Batch identity. By default, v-flow derives one from the source hierarchy and content."),
+    import_batch: str = typer.Option(None, "--import-batch", help="Stable Import Batch identity. By default, v-flow derives one from the source name, card paths, and file sizes."),
     auto: bool = typer.Option(False, "--auto", "-a", help="Automatically infer shoot folder name from file dates. Creates date range if spanning multiple days."),
     files: list[str] = typer.Option(None, "--files", help="Optional: Specific filenames, patterns, or ranges to ingest (e.g., 'C3317' or 'C3317-C3351'). Can specify multiple times. If omitted, ingests all files."),
     include_all: bool = typer.Option(False, "--include-all", help="Also preserve non-footage card files inside a hidden folder in the Shoot."),
