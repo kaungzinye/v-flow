@@ -17,7 +17,7 @@ The media received from one camera card or source folder during a single ingest,
 _Avoid_: Batch folder, card folder
 
 **Shoot Manifest**:
-The hidden `.vflow-manifest.json` inside a Shoot or Collection folder. It records the checksum algorithm and, per file, its name, byte size, checksum, card-relative path, Import Batch, and ingest time, plus the files excluded or deduplicated during ingest.
+The hidden `.vflow-manifest.json` inside a Shoot or Collection folder. It records the checksum algorithm and, per file, its name, byte size, checksum, card-relative path, Import Batch, and ingest time, plus the files excluded or deduplicated during ingest and the capture-date span its folder's contents cover.
 _Avoid_: Sidecar, index
 
 **Partial Shoot Manifest**:
