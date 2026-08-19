@@ -1,24 +1,21 @@
 from __future__ import annotations
 
-import hashlib
 import os
-import re
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from string import ascii_lowercase
 from typing import Optional
 
 from .shoot_manifest import (
-    CHECKSUM_ALGORITHM,
-    CHUNK_SIZE,
     EXTRAS_DIRECTORY,
     FOOTAGE_EXTENSIONS,
     MANIFEST_NAME,
     PENDING_MANIFEST_NAME,
+    batch_identity,
     build_checksum_index,
     checksum,
+    destination_name,
     load_manifest,
+    place_verified,
     relative_path,
     safe_identity,
     shoot_directory,
@@ -37,68 +34,6 @@ def _exclusion_reason(relative: Path) -> Optional[str]:
     if relative.suffix.lower() not in FOOTAGE_EXTENSIONS:
         return "non-footage file type"
     return None
-
-
-def _batch_identity(source: Path, entries: list[tuple[str, int]]) -> str:
-    """Identity from source name plus card-relative paths and sizes, without reading content."""
-    digest = hashlib.sha256()
-    for path, byte_size in sorted(entries):
-        digest.update(path.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(str(byte_size).encode("ascii"))
-        digest.update(b"\n")
-    source_name = re.sub(r"[^A-Za-z0-9._-]+", "-", source.name).strip("-.") or "card"
-    return f"{source_name}-{digest.hexdigest()[:12]}"
-
-
-def _copy_hashing(source: Path, temporary: Path) -> str:
-    """Copy one file, hashing the single source read."""
-    digest = hashlib.new(CHECKSUM_ALGORITHM)
-    temporary.parent.mkdir(parents=True, exist_ok=True)
-    with source.open("rb") as reader, temporary.open("wb") as writer:
-        for chunk in iter(lambda: reader.read(CHUNK_SIZE), b""):
-            digest.update(chunk)
-            writer.write(chunk)
-    shutil.copystat(source, temporary)
-    return digest.hexdigest()
-
-
-def _place_verified(source: Path, destination: Path, expected: Optional[str] = None) -> str:
-    """Copy into place and prove the destination by re-hashing it on the archive drive."""
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_name(f".{destination.name}.vflow-part")
-    try:
-        source_checksum = _copy_hashing(source, temporary)
-        if expected is not None and source_checksum != expected:
-            raise ValueError(f"Source content changed during ingest: {source}")
-        if checksum(temporary) != source_checksum:
-            raise ValueError(f"Checksum verification failed for {destination}")
-        os.replace(temporary, destination)
-    except Exception:
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
-    return source_checksum
-
-
-def _suffixed_names(name: str):
-    stem, suffix = Path(name).stem, Path(name).suffix
-    yield name
-    for letter in ascii_lowercase[1:]:
-        yield f"{stem}_{letter}{suffix}"
-    counter = 2
-    while True:
-        yield f"{stem}_{counter}{suffix}"
-        counter += 1
-
-
-def _destination_name(name: str, taken: set[str], shoot_path: Path) -> str:
-    for candidate in _suffixed_names(name):
-        if candidate not in taken and not (shoot_path / candidate).exists():
-            return candidate
-    raise ValueError(f"No available destination name for {name}")
 
 
 def ingest_card(
@@ -126,7 +61,7 @@ def ingest_card(
         relative.as_posix(): path.stat().st_size for relative, path in candidates
     }
     batch_id = safe_identity(
-        batch_id or _batch_identity(source, list(sizes.items())),
+        batch_id or batch_identity(source, list(sizes.items())),
         "Import Batch identity",
     )
 
@@ -168,7 +103,7 @@ def ingest_card(
             if include_all:
                 extra = shoot_path / EXTRAS_DIRECTORY / relative
                 if not extra.is_file():
-                    record["checksum"] = _place_verified(source_file, extra)
+                    record["checksum"] = place_verified(source_file, extra)
                 else:
                     record["checksum"] = checksum(extra)
                 record["stored_as"] = (
@@ -225,8 +160,8 @@ def ingest_card(
                 save_progress()
                 continue
 
-        name = _destination_name(relative.name, set(taken), shoot_path)
-        stored_checksum = _place_verified(
+        name = destination_name(relative.name, set(taken), shoot_path)
+        stored_checksum = place_verified(
             source_file, shoot_path / name, expected=source_checksum
         )
         record = {

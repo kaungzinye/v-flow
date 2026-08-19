@@ -4,7 +4,7 @@ from pathlib import Path
 import yaml
 from typer.testing import CliRunner
 
-from vflow import card_ingest
+from vflow import card_ingest, shoot_manifest
 from vflow import config as vflow_config
 from vflow.main import app
 
@@ -175,14 +175,14 @@ def test_destination_is_verified_by_rehashing_the_archive_copy(tmp_path, monkeyp
     archive, _ = _configure(tmp_path, monkeypatch)
     source = tmp_path / "CARD"
     _write(source / "C0001.MP4", b"clip-one")
-    original_copy = card_ingest._copy_hashing
+    original_copy = shoot_manifest.copy_hashing
 
     def copy_then_corrupt(source_file, temporary):
         digest = original_copy(source_file, temporary)
         temporary.write_bytes(b"corrupted-on-arrival")
         return digest
 
-    monkeypatch.setattr(card_ingest, "_copy_hashing", copy_then_corrupt)
+    monkeypatch.setattr(shoot_manifest, "copy_hashing", copy_then_corrupt)
     result = runner.invoke(app, ["ingest", "-s", str(source), "-n", "Shoot"])
 
     assert result.exit_code == 1
@@ -195,7 +195,7 @@ def test_repeated_ingest_resumes_from_the_manifest(tmp_path, monkeypatch):
     source = tmp_path / "CARD"
     _write(source / "C0001.MP4", b"clip-one")
     _write(source / "C0002.MP4", b"clip-two-longer")
-    original_place = card_ingest._place_verified
+    original_place = card_ingest.place_verified
     attempts = 0
 
     def fail_second_copy(source_file, destination, expected=None):
@@ -205,7 +205,7 @@ def test_repeated_ingest_resumes_from_the_manifest(tmp_path, monkeypatch):
             raise OSError("simulated interruption")
         return original_place(source_file, destination, expected)
 
-    monkeypatch.setattr(card_ingest, "_place_verified", fail_second_copy)
+    monkeypatch.setattr(card_ingest, "place_verified", fail_second_copy)
     args = ["ingest", "-s", str(source), "-n", "Shoot"]
     interrupted = runner.invoke(app, args)
 
@@ -215,7 +215,7 @@ def test_repeated_ingest_resumes_from_the_manifest(tmp_path, monkeypatch):
     assert not (shoot / ".vflow-manifest.json").exists()
     assert (shoot / ".vflow-manifest.pending.json").exists()
 
-    monkeypatch.setattr(card_ingest, "_place_verified", original_place)
+    monkeypatch.setattr(card_ingest, "place_verified", original_place)
     reads: list[str] = []
     original_open = Path.open
 
