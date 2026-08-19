@@ -12,14 +12,13 @@ These terms control choices across branches:
 - **Archive** — protected long-term media storage, usually an HDD. v-flow copies and verifies files here.
 - **Working Copy** — a temporary copy of archived footage on a laptop or SSD for editing.
 - **Shoot** — footage captured in a certain date range and stored as one named flat folder.
-- **Collection** — photos from an event or trip stored as one named flat folder, independent of Shoots.
+- **Collection** — the photos from one Shoot's card, stored as one named flat folder. One ingest names the Collection after the Shoot unless the user names it separately.
 - **Project** — a DaVinci Resolve editing effort that may use footage from several Shoots.
 
 Route by the outcome the user wants:
 
 - Set up drives or change where media lives: [references/setup.md](references/setup.md)
-- Copy video footage from a camera card or received folder: [references/ingest.md](references/ingest.md)
-- Copy photos from a card or folder: [references/photos.md](references/photos.md) — a card holding both footage and photos takes both branches, footage first
+- Copy footage or photos from a camera card or received folder: [references/ingest.md](references/ingest.md)
 - Put footage on an editing drive, edit from the Archive, or remove a temporary editing copy: [references/working-copies.md](references/working-copies.md)
 - Save a finished video, graded clip, or Resolve project backup: [references/delivery.md](references/delivery.md)
 - Back up an ordinary folder or copy files out of long-term storage: [references/backup-restore.md](references/backup-restore.md)

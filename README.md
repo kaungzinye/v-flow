@@ -70,7 +70,7 @@ You can say:
 
 > Ingest this card using v-flow.
 
-In v-flow, **ingest** means copying the footage from one card or source folder into the Archive while leaving the source unchanged.
+In v-flow, **ingest** means copying one card or source folder into the Archive while leaving the source unchanged. Footage goes to a Shoot and photos go to a **Collection**, so one card takes one command.
 
 ```bash
 v-flow ingest --source "/Volumes/SDCARD" --shoot "2026-08-02_Stockholm"
@@ -95,7 +95,9 @@ After a successful ingest:
 - the card or source folder remains unchanged;
 - no footage has been copied to your editing SSD yet.
 
-Use `--auto` instead of `--shoot` when you want v-flow to derive the Shoot name from media dates.
+Photos from the same card land flat in `Photo/RAW/2026-08-02_Stockholm/` with their editing sidecars (`.pp3`, `.xmp`) beside them and a manifest of their own. Pass `--collection` to name that folder separately. A card without photos creates no Collection, and a card without footage creates no Shoot.
+
+Use `--auto` instead of `--shoot` when you want v-flow to derive the name of both from media dates.
 
 ### 2. Put archived footage on an editing drive
 

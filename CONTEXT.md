@@ -13,7 +13,7 @@ Footage captured in a certain date range and stored as one named collection, hel
 _Avoid_: Project, day folder
 
 **Import Batch**:
-The footage received from one camera card or source folder during a single ingest, recorded per file in the Shoot manifest.
+The media received from one camera card or source folder during a single ingest, recorded per file in every manifest that ingest writes. One card carrying both footage and photos records the same Import Batch into its Shoot Manifest and its Collection's manifest.
 _Avoid_: Batch folder, card folder
 
 **Shoot Manifest**:
@@ -29,7 +29,7 @@ Hashing the files already sitting in a Shoot or Collection folder to give it a c
 _Avoid_: Scan, import, migration
 
 **Collection**:
-A freely named group of photos held as one flat folder under `Photo/RAW`, together with their editing sidecars and a Shoot Manifest. Collections are named by event or trip, are independent of footage Shoots, and are never renamed by v-flow.
+A freely named group of photos held as one flat folder under `Photo/RAW`, together with their editing sidecars and a Shoot Manifest. A Collection takes the name of the Shoot its card fed, and an explicit Collection name overrides that. A Collection is its own folder with its own manifest, so it stands on its own where no footage exists, and v-flow never renames one.
 _Avoid_: Photo shoot, album, day folder
 
 **Camera Original**:
