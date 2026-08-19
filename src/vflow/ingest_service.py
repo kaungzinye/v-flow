@@ -323,6 +323,7 @@ def photo_ingest(
     source_dir: str,
     collection_name: str,
     archive_path: Path,
+    files_filter: Optional[list[str]] = None,
     import_batch_id: Optional[str] = None,
 ) -> None:
     """Copy RAW photos and their editing sidecars into a flat, checksum-verified Collection."""
@@ -331,6 +332,22 @@ def photo_ingest(
         typer.echo(f"Source directory not found: {source_path}", err=True)
         raise typer.Exit(code=1)
 
+    selected_files: Optional[list[Path]] = None
+    if files_filter:
+        all_source_files = [path for path in source_path.rglob("*") if path.is_file()]
+        selected_files = []
+        for pattern in files_filter:
+            selected_files.extend(
+                path for path in all_source_files if _matches_pattern(pattern, path.name)
+            )
+        selected_files = list(dict.fromkeys(selected_files))
+        if not selected_files:
+            typer.echo(
+                f"No files found matching filter: {', '.join(files_filter)}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
     typer.echo(f"Archiving photos into Collection '{collection_name}'...")
     try:
         result = ingest_photos(
@@ -338,6 +355,7 @@ def photo_ingest(
             archive=archive_path,
             collection=collection_name,
             batch_id=import_batch_id,
+            selected_files=selected_files,
         )
     except (OSError, ValueError) as error:
         typer.echo(f"Photo ingest failed: {error}", err=True)

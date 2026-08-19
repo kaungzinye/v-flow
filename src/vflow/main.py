@@ -147,6 +147,7 @@ def photo_ingest_cmd(
     source: str = typer.Option(..., "--source", "-s", help="Camera card or source folder to copy photos from (e.g., '/Volumes/Untitled/DCIM/100MSDCF')."),
     collection: str = typer.Option(..., "--collection", "-c", help="Name of the photo Collection in Photo/RAW, free to be an event name (e.g., '20240920 THOR 2024')."),
     import_batch: str = typer.Option(None, "--import-batch", help="Stable Import Batch identity. By default, v-flow derives one from the source name, card paths, and file sizes."),
+    files: list[str] = typer.Option(None, "--files", help="Optional: Specific filenames, patterns, or ranges to ingest (e.g., 'DSC00811' or 'DSC00811-DSC00842'). Can specify multiple times. If omitted, ingests all photos."),
 ):
     """
     Copies RAW photos from a camera card or source folder into a flat Collection.
@@ -154,13 +155,19 @@ def photo_ingest_cmd(
     Photos land directly in Photo/RAW/<collection>. A hidden SHA-256 manifest records
     every archived file, its card path, exclusions, and deduplicated frames. A skip
     needs checksum identity, so recycled camera filenames stay distinct. Editing
-    sidecars (.pp3, .xmp) ride along beside the photo they belong to. Collections are
-    named freely and keep their names. Supported formats: ARW, CR2, CR3, NEF, DNG,
-    ORF, RW2.
+    sidecars (.pp3, .xmp) ride along beside the photo they belong to, including when
+    --files selects the photo. Collections are named freely and keep their names.
+    Supported formats: ARW, CR2, CR3, NEF, DNG, ORF, RW2.
     """
     app_config = config.load_config()
     archive_dest = config.get_location(app_config, "archive")
-    actions.photo_ingest(source, collection, archive_dest, import_batch_id=import_batch)
+    actions.photo_ingest(
+        source,
+        collection,
+        archive_dest,
+        files_filter=files,
+        import_batch_id=import_batch,
+    )
 
 
 @app.command("card-report")

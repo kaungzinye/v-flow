@@ -244,6 +244,113 @@ def test_photo_destination_is_verified_by_rehashing_the_archive_copy(tmp_path, m
     assert not (_collection(archive, "Event") / "DSC00001.ARW").exists()
 
 
+def test_a_files_range_selects_photos_and_carries_their_sidecars(tmp_path, monkeypatch):
+    archive = _configure(tmp_path, monkeypatch)
+    source = tmp_path / "CARD"
+    for number in range(811, 815):
+        _write(source / "DCIM" / f"DSC00{number}.ARW", f"frame-{number}".encode())
+    _write(source / "DCIM" / "DSC00812.ARW.pp3", b"edits-for-812")
+    _write(source / "DCIM" / "DSC00813.xmp", b"metadata-for-813")
+    _write(source / "DCIM" / "DSC00814.ARW.pp3", b"edits-for-814")
+
+    result = runner.invoke(
+        app,
+        [
+            "photo-ingest",
+            "-s",
+            str(source),
+            "-c",
+            "Event",
+            "--files",
+            "DSC00812-DSC00813",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    collection = _collection(archive, "Event")
+    assert sorted(path.name for path in collection.iterdir()) == [
+        ".vflow-manifest.json",
+        "DSC00812.ARW",
+        "DSC00812.ARW.pp3",
+        "DSC00813.ARW",
+        "DSC00813.xmp",
+    ]
+    entries = {entry["name"]: entry for entry in _manifest(collection)["files"]}
+    assert entries["DSC00812.ARW.pp3"]["sidecar_for"] == "DSC00812.ARW"
+    assert entries["DSC00813.xmp"]["sidecar_for"] == "DSC00813.ARW"
+
+
+def test_several_files_patterns_select_photos_by_name(tmp_path, monkeypatch):
+    archive = _configure(tmp_path, monkeypatch)
+    source = tmp_path / "CARD"
+    for number in range(1, 4):
+        _write(source / f"DSC0000{number}.ARW", f"frame-{number}".encode())
+
+    result = runner.invoke(
+        app,
+        ["photo-ingest", "-s", str(source), "-c", "Event", "--files", "DSC00001", "--files", "DSC00003"],
+    )
+
+    assert result.exit_code == 0, result.output
+    collection = _collection(archive, "Event")
+    assert sorted(path.name for path in collection.iterdir()) == [
+        ".vflow-manifest.json",
+        "DSC00001.ARW",
+        "DSC00003.ARW",
+    ]
+
+
+def test_a_files_filter_matching_nothing_stops_the_ingest(tmp_path, monkeypatch):
+    archive = _configure(tmp_path, monkeypatch)
+    source = tmp_path / "CARD"
+    _write(source / "DSC00001.ARW", b"first-frame")
+
+    result = runner.invoke(
+        app,
+        ["photo-ingest", "-s", str(source), "-c", "Event", "--files", "DSC09000-DSC09100"],
+    )
+
+    assert result.exit_code == 1
+    assert "No files found matching filter: DSC09000-DSC09100" in result.output
+    assert not _collection(archive, "Event").exists()
+
+
+def test_filtered_ingest_keeps_checksum_dedup_and_manifest_records(tmp_path, monkeypatch):
+    archive = _configure(tmp_path, monkeypatch)
+    first = tmp_path / "card-a"
+    second = tmp_path / "card-b"
+    _write(first / "DSC00001.ARW", b"one-and-only")
+    _write(second / "DSC00811.ARW", b"one-and-only")
+    _write(second / "DSC00812.ARW", b"fresh-frame")
+    _write(second / "DSC00812.ARW.pp3", b"edits-for-812")
+    _write(second / "DSC00813.ARW", b"left-on-the-card")
+
+    assert runner.invoke(app, ["photo-ingest", "-s", str(first), "-c", "Monday"]).exit_code == 0
+    result = runner.invoke(
+        app,
+        ["photo-ingest", "-s", str(second), "-c", "Tuesday", "--files", "DSC00811-DSC00812"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "2 copied, 0 already verified, 1 deduplicated" in result.output
+    tuesday = _collection(archive, "Tuesday")
+    assert sorted(path.name for path in tuesday.iterdir()) == [
+        ".vflow-manifest.json",
+        "DSC00812.ARW",
+        "DSC00812.ARW.pp3",
+    ]
+    manifest = _manifest(tuesday)
+    skipped = manifest["deduplicated"]
+    assert len(skipped) == 1
+    assert skipped[0]["original_name"] == "DSC00811.ARW"
+    assert skipped[0]["existing_location"] == "Photo/RAW/Monday/DSC00001.ARW"
+    assert (_collection(archive, "Monday") / "DSC00001.ARW.pp3").exists() is False
+    assert {entry["name"] for entry in manifest["files"]} == {
+        "DSC00812.ARW",
+        "DSC00812.ARW.pp3",
+    }
+
+
 def test_photo_ingest_leaves_hand_placed_collection_files_alone(tmp_path, monkeypatch):
     archive = _configure(tmp_path, monkeypatch)
     collection = _collection(archive, "20220612-20220619")

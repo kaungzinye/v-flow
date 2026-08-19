@@ -103,16 +103,29 @@ def ingest_photos(
     archive: Path,
     collection: str,
     batch_id: Optional[str] = None,
+    selected_files: Optional[list[Path]] = None,
 ) -> dict:
     """Copy RAW photos and their editing sidecars into a flat Collection folder."""
     collection = safe_identity(collection, "Collection identity")
-    candidates = sorted(
+    on_card = sorted(
         (path.relative_to(source), path)
         for path in source.rglob("*")
         if path.is_file()
     )
-    if not candidates:
+    if not on_card:
         raise ValueError("No files found in the source directory.")
+
+    attached = _attach_sidecars(on_card)
+    candidates = on_card
+    if selected_files is not None:
+        # A filter picks photos; each selected photo brings its own sidecars.
+        chosen = {path.relative_to(source) for path in selected_files} - set(attached)
+        chosen |= {
+            sidecar for sidecar, (photo, _) in attached.items() if photo in chosen
+        }
+        candidates = [pair for pair in on_card if pair[0] in chosen]
+    if not candidates:
+        raise ValueError("No photos found in the source directory.")
 
     sizes = {relative.as_posix(): path.stat().st_size for relative, path in candidates}
     batch_id = safe_identity(
@@ -133,7 +146,6 @@ def ingest_photos(
         (entry.get("batch_id"), entry.get("source_relative_path")): entry
         for entry in manifest["files"]
     }
-    attached = _attach_sidecars(candidates)
     riders: dict[Path, list[tuple[Path, Path, str]]] = {}
     for relative, path in candidates:
         pair = attached.get(relative)
