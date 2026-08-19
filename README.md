@@ -27,6 +27,12 @@ Then point it at your drives:
 v-flow make-config
 ```
 
+Then check the whole environment in one command, which tells you in plain words what works and what to fix:
+
+```bash
+v-flow doctor
+```
+
 ## Use it
 
 Ingest a card. Footage lands in a Shoot, photos in a Collection, one command:
@@ -39,7 +45,7 @@ Put a Shoot on your editing drive, and clean it up when you're done (cleanup ver
 
 ```bash
 v-flow checkout --shoot "2026-08-02_Ingest" --working-location work_ssd
-v-flow cleanup  --shoot "2026-08-02_Ingest" --working-location work_ssd --project "Summer Film"
+v-flow cleanup  --shoot "2026-08-02_Ingest" --working-location work_ssd --project "Summer Film" --confirm
 ```
 
 Or skip the flags entirely and ask your agent:
@@ -47,6 +53,8 @@ Or skip the flags entirely and ask your agent:
 > Ingest this card, then put the footage on my SSD.
 
 Every state-changing command supports a dry run, names the safety gate that failed, and leaves your card and archive intact on any error.
+
+Every decision v-flow needs has a flag that carries it, such as `--confirm` for a deletion or `--merge-into` for a date overlap. Reach one without the flag and without a terminal to ask, and the command stops and names the flag rather than guessing. Long copies print plain progress lines, and an interrupted run resumes when you re-run the same command.
 
 ## Notes
 
