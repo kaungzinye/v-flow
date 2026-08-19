@@ -3,7 +3,7 @@ Thin façade that re-exports every public action from the service modules.
 
 main.py and tests import ``actions.*``; the real implementations live in:
 
-- ingest_service   – ingest_shoot, ingest_report, card_report, and photo_ingest
+- ingest_service   – ingest_media, ingest_report, and card_report
 - delivery_service – archive_file and copy_metadata_folder
 - backup_service   – consolidate_files, verify_backup, list_backups,
                      restore_folder, and list_duplicates
@@ -11,8 +11,7 @@ main.py and tests import ``actions.*``; the real implementations live in:
 
 from .ingest_service import (  # noqa: F401
     ingest_report,
-    ingest_shoot,
-    photo_ingest,
+    ingest_media,
     card_report,
 )
 

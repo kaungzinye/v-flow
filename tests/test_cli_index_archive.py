@@ -252,7 +252,7 @@ def test_indexed_collections_participate_in_photo_ingest_dedup(tmp_path, monkeyp
     source = tmp_path / "CARD"
     _write(source / "DSC09001.ARW", b"legacy-frame")
 
-    result = runner.invoke(app, ["photo-ingest", "-s", str(source), "-c", "Fresh"])
+    result = runner.invoke(app, ["ingest", "-s", str(source), "-n", "Fresh"])
 
     assert result.exit_code == 0, result.output
     skipped = _manifest(_collection(archive, "Fresh"))["deduplicated"]

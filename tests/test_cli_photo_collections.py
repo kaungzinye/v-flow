@@ -62,10 +62,10 @@ def test_photo_ingest_lands_flat_with_sidecars_and_a_hidden_manifest(tmp_path, m
     result = runner.invoke(
         app,
         [
-            "photo-ingest",
+            "ingest",
             "--source",
             str(source),
-            "--collection",
+            "--shoot",
             "20240920 THOR 2024",
             "--import-batch",
             "card-a",
@@ -114,8 +114,8 @@ def test_same_name_and_size_photos_both_land_on_differing_content(tmp_path, monk
     _write(first / "DSC00001.ARW", b"AAAA")
     _write(second / "DSC00001.ARW", b"BBBB")
 
-    assert runner.invoke(app, ["photo-ingest", "-s", str(first), "-c", "Event"]).exit_code == 0
-    result = runner.invoke(app, ["photo-ingest", "-s", str(second), "-c", "Event"])
+    assert runner.invoke(app, ["ingest", "-s", str(first), "-n", "Event"]).exit_code == 0
+    result = runner.invoke(app, ["ingest", "-s", str(second), "-n", "Event"])
 
     assert result.exit_code == 0, result.output
     collection = _collection(archive, "Event")
@@ -133,8 +133,8 @@ def test_identical_content_under_another_name_deduplicates(tmp_path, monkeypatch
     _write(second / "DSC09999.ARW", b"one-and-only")
     _write(second / "DSC10000.ARW", b"fresh-frame")
 
-    assert runner.invoke(app, ["photo-ingest", "-s", str(first), "-c", "Monday"]).exit_code == 0
-    result = runner.invoke(app, ["photo-ingest", "-s", str(second), "-c", "Tuesday"])
+    assert runner.invoke(app, ["ingest", "-s", str(first), "-n", "Monday"]).exit_code == 0
+    result = runner.invoke(app, ["ingest", "-s", str(second), "-n", "Tuesday"])
 
     assert result.exit_code == 0, result.output
     assert "1 deduplicated" in result.output
@@ -158,8 +158,8 @@ def test_sidecars_follow_their_photo_into_a_suffixed_name(tmp_path, monkeypatch)
     _write(second / "DSC00001.ARW.pp3", b"edits-for-the-second")
     _write(second / "DSC00001.xmp", b"metadata-for-the-second")
 
-    assert runner.invoke(app, ["photo-ingest", "-s", str(first), "-c", "Event"]).exit_code == 0
-    result = runner.invoke(app, ["photo-ingest", "-s", str(second), "-c", "Event"])
+    assert runner.invoke(app, ["ingest", "-s", str(first), "-n", "Event"]).exit_code == 0
+    result = runner.invoke(app, ["ingest", "-s", str(second), "-n", "Event"])
 
     assert result.exit_code == 0, result.output
     collection = _collection(archive, "Event")
@@ -179,8 +179,8 @@ def test_a_deduplicated_photo_sends_its_sidecar_to_the_photo_it_matches(tmp_path
     _write(second / "DSC09999.ARW", b"one-and-only")
     _write(second / "DSC09999.ARW.pp3", b"edits-made-later")
 
-    assert runner.invoke(app, ["photo-ingest", "-s", str(first), "-c", "Monday"]).exit_code == 0
-    result = runner.invoke(app, ["photo-ingest", "-s", str(second), "-c", "Tuesday"])
+    assert runner.invoke(app, ["ingest", "-s", str(first), "-n", "Monday"]).exit_code == 0
+    result = runner.invoke(app, ["ingest", "-s", str(second), "-n", "Tuesday"])
 
     assert result.exit_code == 0, result.output
     monday = _collection(archive, "Monday")
@@ -198,7 +198,7 @@ def test_repeating_an_ingest_copies_nothing_twice(tmp_path, monkeypatch):
     source = tmp_path / "CARD"
     _write(source / "DSC00001.ARW", b"first-frame")
     _write(source / "DSC00001.ARW.pp3", b"edits")
-    args = ["photo-ingest", "-s", str(source), "-c", "Event"]
+    args = ["ingest", "-s", str(source), "-n", "Event"]
 
     assert runner.invoke(app, args).exit_code == 0
     repeat = runner.invoke(app, args)
@@ -220,7 +220,7 @@ def test_an_editing_sidecar_without_its_photo_stays_off_the_archive(tmp_path, mo
     _write(source / "DSC00001.ARW", b"first-frame")
     _write(source / "DSC00777.xmp", b"orphan-metadata")
 
-    result = runner.invoke(app, ["photo-ingest", "-s", str(source), "-c", "Event"])
+    result = runner.invoke(app, ["ingest", "-s", str(source), "-n", "Event"])
 
     assert result.exit_code == 0, result.output
     collection = _collection(archive, "Event")
@@ -241,7 +241,7 @@ def test_photo_destination_is_verified_by_rehashing_the_archive_copy(tmp_path, m
         return digest
 
     monkeypatch.setattr(shoot_manifest, "copy_hashing", copy_then_corrupt)
-    result = runner.invoke(app, ["photo-ingest", "-s", str(source), "-c", "Event"])
+    result = runner.invoke(app, ["ingest", "-s", str(source), "-n", "Event"])
 
     assert result.exit_code == 1
     assert "Checksum verification failed" in result.output
@@ -260,10 +260,10 @@ def test_a_files_range_selects_photos_and_carries_their_sidecars(tmp_path, monke
     result = runner.invoke(
         app,
         [
-            "photo-ingest",
+            "ingest",
             "-s",
             str(source),
-            "-c",
+            "-n",
             "Event",
             "--files",
             "DSC00812-DSC00813",
@@ -292,7 +292,7 @@ def test_several_files_patterns_select_photos_by_name(tmp_path, monkeypatch):
 
     result = runner.invoke(
         app,
-        ["photo-ingest", "-s", str(source), "-c", "Event", "--files", "DSC00001", "--files", "DSC00003"],
+        ["ingest", "-s", str(source), "-n", "Event", "--files", "DSC00001", "--files", "DSC00003"],
     )
 
     assert result.exit_code == 0, result.output
@@ -311,7 +311,7 @@ def test_a_files_filter_matching_nothing_stops_the_ingest(tmp_path, monkeypatch)
 
     result = runner.invoke(
         app,
-        ["photo-ingest", "-s", str(source), "-c", "Event", "--files", "DSC09000-DSC09100"],
+        ["ingest", "-s", str(source), "-n", "Event", "--files", "DSC09000-DSC09100"],
     )
 
     assert result.exit_code == 1
@@ -329,10 +329,10 @@ def test_filtered_ingest_keeps_checksum_dedup_and_manifest_records(tmp_path, mon
     _write(second / "DSC00812.ARW.pp3", b"edits-for-812")
     _write(second / "DSC00813.ARW", b"left-on-the-card")
 
-    assert runner.invoke(app, ["photo-ingest", "-s", str(first), "-c", "Monday"]).exit_code == 0
+    assert runner.invoke(app, ["ingest", "-s", str(first), "-n", "Monday"]).exit_code == 0
     result = runner.invoke(
         app,
-        ["photo-ingest", "-s", str(second), "-c", "Tuesday", "--files", "DSC00811-DSC00812"],
+        ["ingest", "-s", str(second), "-n", "Tuesday", "--files", "DSC00811-DSC00812"],
     )
 
     assert result.exit_code == 0, result.output
@@ -362,7 +362,7 @@ def test_photo_ingest_leaves_hand_placed_collection_files_alone(tmp_path, monkey
     source = tmp_path / "CARD"
     _write(source / "DSC00001.ARW", b"from-the-card")
 
-    result = runner.invoke(app, ["photo-ingest", "-s", str(source), "-c", "20220612-20220619"])
+    result = runner.invoke(app, ["ingest", "-s", str(source), "-n", "20220612-20220619"])
 
     assert result.exit_code == 0, result.output
     assert (collection / "DSC00001.ARW").read_bytes() == b"hand-placed"
@@ -379,7 +379,7 @@ def test_compressed_photos_ingest_as_originals(tmp_path, monkeypatch):
 
     result = runner.invoke(
         app,
-        ["photo-ingest", "--source", str(source), "--collection", "Lappis Park"],
+        ["ingest", "--source", str(source), "--shoot", "Lappis Park"],
     )
 
     assert result.exit_code == 0, result.output

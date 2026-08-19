@@ -17,19 +17,25 @@ from . import actions
 
 @app.command()
 def ingest(
-    source: str = typer.Option(..., "--source", "-s", help="Camera card or source folder to copy footage from."),
+    source: str = typer.Option(..., "--source", "-s", help="Camera card or source folder to copy footage and photos from."),
     shoot: str = typer.Option(None, "--shoot", "-n", help="Name of the shoot (e.g., '2025-09-15_Stockholm_Broll'). Optional if --auto is used."),
+    collection: str = typer.Option(None, "--collection", "-c", help="Name of the photo Collection in Photo/RAW. Defaults to the Shoot name."),
     import_batch: str = typer.Option(None, "--import-batch", help="Stable Import Batch identity. By default, v-flow derives one from the source name, card paths, and file sizes."),
-    auto: bool = typer.Option(False, "--auto", "-a", help="Automatically infer shoot folder name from file dates. Creates date range if spanning multiple days."),
-    files: list[str] = typer.Option(None, "--files", help="Optional: Specific filenames, patterns, or ranges to ingest (e.g., 'C3317' or 'C3317-C3351'). Can specify multiple times. If omitted, ingests all files."),
+    auto: bool = typer.Option(False, "--auto", "-a", help="Automatically infer the Shoot and Collection name from file dates. Creates date range if spanning multiple days."),
+    files: list[str] = typer.Option(None, "--files", help="Optional: Specific filenames, patterns, or ranges to ingest (e.g., 'C3317' or 'DSC00811-DSC00842'). Can specify multiple times. If omitted, ingests all files."),
     include_all: bool = typer.Option(False, "--include-all", help="Also preserve non-footage card files inside a hidden folder in the Shoot."),
 ):
     """
-    Copies footage from a camera card or source folder into a flat Shoot folder.
+    Copies one card's footage into a flat Shoot and its photos into a flat Collection.
 
-    Footage lands directly in Video/RAW/<shoot>. A hidden SHA-256 manifest records
-    every archived file, its card path, exclusions, and deduplicated clips. Ingest
-    leaves the source untouched and creates no Working Copy.
+    Footage lands directly in Video/RAW/<shoot>, photos in Photo/RAW/<collection>, which
+    carries the Shoot name unless --collection names it. A card without footage creates no
+    Shoot, and a card without photos creates no Collection. Editing sidecars (.pp3, .xmp)
+    ride into the Collection beside the photo they belong to, including when --files selects
+    the photo. Each folder carries a hidden SHA-256 manifest recording every archived file,
+    its card path, exclusions, and deduplicated originals. A skip needs checksum identity, so
+    recycled camera filenames stay distinct. Ingest leaves the source untouched and creates
+    no Working Copy.
     """
     if not auto and not shoot:
         typer.echo("Either --shoot or --auto must be provided.", err=True)
@@ -41,11 +47,12 @@ def ingest(
     # Ingest depends only on protected Archive storage.
     archive_dest = config.get_location(app_config, "archive")
         
-    actions.ingest_shoot(
+    actions.ingest_media(
         source,
         shoot,
         archive_dest,
         auto=auto,
+        collection_name=collection,
         files_filter=files,
         import_batch_id=import_batch,
         include_all=include_all,
@@ -186,34 +193,6 @@ def ingest_report_cmd(
     archive_dest = config.get_location(app_config, "archive")
     laptop_dest = config.get_location(app_config, "laptop")
     actions.ingest_report(source, archive_dest, laptop_path=laptop_dest, priority_day=priority_day, priority_month=priority_month)
-
-@app.command("photo-ingest")
-def photo_ingest_cmd(
-    source: str = typer.Option(..., "--source", "-s", help="Camera card or source folder to copy photos from (e.g., '/Volumes/Untitled/DCIM/100MSDCF')."),
-    collection: str = typer.Option(..., "--collection", "-c", help="Name of the photo Collection in Photo/RAW, free to be an event name (e.g., '20240920 THOR 2024')."),
-    import_batch: str = typer.Option(None, "--import-batch", help="Stable Import Batch identity. By default, v-flow derives one from the source name, card paths, and file sizes."),
-    files: list[str] = typer.Option(None, "--files", help="Optional: Specific filenames, patterns, or ranges to ingest (e.g., 'DSC00811' or 'DSC00811-DSC00842'). Can specify multiple times. If omitted, ingests all photos."),
-):
-    """
-    Copies RAW photos from a camera card or source folder into a flat Collection.
-
-    Photos land directly in Photo/RAW/<collection>. A hidden SHA-256 manifest records
-    every archived file, its card path, exclusions, and deduplicated frames. A skip
-    needs checksum identity, so recycled camera filenames stay distinct. Editing
-    sidecars (.pp3, .xmp) ride along beside the photo they belong to, including when
-    --files selects the photo. Collections are named freely and keep their names.
-    Supported formats: ARW, CR2, CR3, NEF, DNG, ORF, RW2.
-    """
-    app_config = config.load_config()
-    archive_dest = config.get_location(app_config, "archive")
-    actions.photo_ingest(
-        source,
-        collection,
-        archive_dest,
-        files_filter=files,
-        import_batch_id=import_batch,
-    )
-
 
 @app.command("card-report")
 def card_report_cmd(

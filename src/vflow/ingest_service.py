@@ -12,6 +12,8 @@ from .core.date_utils import (
 )
 from .core.patterns import _extract_number_from_filename, _matches_pattern
 from .card_ingest import ingest_card
+from .card_ingest import _exclusion_reason as _footage_exclusion_reason
+from .collection_ingest import _hidden_reason
 from .collection_ingest import ingest_photos
 from .shoot_manifest import PHOTO_EXTENSIONS
 
@@ -245,16 +247,50 @@ def ingest_report(
     typer.echo("")
 
 
-def ingest_shoot(
+def _carries_footage(source: Path, files: list[Path]) -> bool:
+    return any(
+        _footage_exclusion_reason(path.relative_to(source)) is None for path in files
+    )
+
+
+def _carries_photos(source: Path, files: list[Path]) -> bool:
+    return any(
+        path.suffix.lower() in PHOTO_EXTENSIONS
+        and _hidden_reason(path.relative_to(source)) is None
+        for path in files
+    )
+
+
+def _abort(error: Exception) -> typer.Exit:
+    typer.echo(f"Ingest failed: {error}", err=True)
+    typer.echo(
+        "Verified Archive files remain intact; retry the same ingest to resume.",
+        err=True,
+    )
+    return typer.Exit(code=1)
+
+
+def _summarize(result: dict, kind: str) -> None:
+    typer.echo(
+        f"Import Batch '{result['batch_id']}': "
+        f"{result['copied']} copied, {result['verified']} already verified, "
+        f"{result['deduplicated']} deduplicated, {result['excluded']} excluded, "
+        f"{result['files']} in {kind}."
+    )
+    typer.echo(f"Manifest: {result['manifest_path']}")
+
+
+def ingest_media(
     source_dir: str,
     shoot_name: str,
     archive_dest: Path,
     auto: bool = False,
+    collection_name: Optional[str] = None,
     files_filter: Optional[list[str]] = None,
     import_batch_id: Optional[str] = None,
     include_all: bool = False,
 ) -> None:
-    """Copy footage from one card into a flat, checksum-verified Shoot folder."""
+    """Copy one card's footage into a flat Shoot and its photos into a flat Collection."""
     source_path = Path(source_dir)
     if not source_path.exists() or not source_path.is_dir():
         typer.echo(f"Source directory not found: {source_path}", err=True)
@@ -291,87 +327,46 @@ def ingest_shoot(
         typer.echo("Shoot name is required when --auto is not used.", err=True)
         raise typer.Exit(code=1)
 
-    typer.echo(f"Archiving footage into Shoot '{target_shoot_name}'...")
-    try:
-        result = ingest_card(
-            source=source_path,
-            archive=archive_dest,
-            shoot=target_shoot_name,
-            batch_id=import_batch_id,
-            selected_files=selected_files,
-            include_all=include_all,
-        )
-    except (OSError, ValueError) as error:
-        typer.echo(f"Ingest failed: {error}", err=True)
-        typer.echo(
-            "Verified Archive files remain intact; retry the same ingest to resume.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-    typer.echo(f"Shoot folder: {result['shoot_directory']}")
-    typer.echo(
-        f"Import Batch '{result['batch_id']}': "
-        f"{result['copied']} copied, {result['verified']} already verified, "
-        f"{result['deduplicated']} deduplicated, {result['excluded']} excluded, "
-        f"{result['files']} in Shoot."
-    )
-    typer.echo(f"Manifest: {result['manifest_path']}")
-    typer.echo("Retained copies: 1 (Archive only). The source remains untouched.")
+    # The Collection carries the Shoot's name so one card lands under one identity.
+    target_collection_name = collection_name or target_shoot_name
 
-
-def photo_ingest(
-    source_dir: str,
-    collection_name: str,
-    archive_path: Path,
-    files_filter: Optional[list[str]] = None,
-    import_batch_id: Optional[str] = None,
-) -> None:
-    """Copy RAW photos and their editing sidecars into a flat, checksum-verified Collection."""
-    source_path = Path(source_dir)
-    if not source_path.exists() or not source_path.is_dir():
-        typer.echo(f"Source directory not found: {source_path}", err=True)
+    footage = _carries_footage(source_path, files_for_identity)
+    photos = _carries_photos(source_path, files_for_identity)
+    if not footage and not photos:
+        typer.echo("No footage or photos found in the source directory.", err=True)
         raise typer.Exit(code=1)
 
-    selected_files: Optional[list[Path]] = None
-    if files_filter:
-        all_source_files = [path for path in source_path.rglob("*") if path.is_file()]
-        selected_files = []
-        for pattern in files_filter:
-            selected_files.extend(
-                path for path in all_source_files if _matches_pattern(pattern, path.name)
+    if footage:
+        typer.echo(f"Archiving footage into Shoot '{target_shoot_name}'...")
+        try:
+            result = ingest_card(
+                source=source_path,
+                archive=archive_dest,
+                shoot=target_shoot_name,
+                batch_id=import_batch_id,
+                selected_files=selected_files,
+                include_all=include_all,
             )
-        selected_files = list(dict.fromkeys(selected_files))
-        if not selected_files:
-            typer.echo(
-                f"No files found matching filter: {', '.join(files_filter)}",
-                err=True,
-            )
-            raise typer.Exit(code=1)
+        except (OSError, ValueError) as error:
+            raise _abort(error)
+        typer.echo(f"Shoot folder: {result['shoot_directory']}")
+        _summarize(result, "Shoot")
 
-    typer.echo(f"Archiving photos into Collection '{collection_name}'...")
-    try:
-        result = ingest_photos(
-            source=source_path,
-            archive=archive_path,
-            collection=collection_name,
-            batch_id=import_batch_id,
-            selected_files=selected_files,
-        )
-    except (OSError, ValueError) as error:
-        typer.echo(f"Photo ingest failed: {error}", err=True)
-        typer.echo(
-            "Verified Archive files remain intact; retry the same ingest to resume.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-    typer.echo(f"Collection folder: {result['collection_directory']}")
-    typer.echo(
-        f"Import Batch '{result['batch_id']}': "
-        f"{result['copied']} copied, {result['verified']} already verified, "
-        f"{result['deduplicated']} deduplicated, {result['excluded']} excluded, "
-        f"{result['files']} in Collection."
-    )
-    typer.echo(f"Manifest: {result['manifest_path']}")
+    if photos:
+        typer.echo(f"Archiving photos into Collection '{target_collection_name}'...")
+        try:
+            result = ingest_photos(
+                source=source_path,
+                archive=archive_dest,
+                collection=target_collection_name,
+                batch_id=import_batch_id,
+                selected_files=selected_files,
+            )
+        except (OSError, ValueError) as error:
+            raise _abort(error)
+        typer.echo(f"Collection folder: {result['collection_directory']}")
+        _summarize(result, "Collection")
+
     typer.echo("Retained copies: 1 (Archive only). The source remains untouched.")
 
 
