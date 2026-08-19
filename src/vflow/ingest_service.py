@@ -6,10 +6,7 @@ from typing import Optional
 
 import typer
 
-from .core.date_utils import (
-    parse_shoot_date_range,
-    format_shoot_name,
-)
+from .core.date_utils import format_shoot_name
 from .core.patterns import _extract_number_from_filename, _matches_pattern
 from .card_ingest import holds_footage, ingest_card
 from .collection_ingest import holds_photos, ingest_photos
@@ -29,61 +26,6 @@ def _get_media_date(file_path: Path) -> datetime:
         return datetime.fromtimestamp(stat.st_mtime)
     except Exception:
         return datetime.now()
-
-
-def _find_existing_shoots(
-    laptop_dest: Path, archive_dest: Path, layout: Optional[Layout] = None
-) -> dict:
-    """
-    Find all existing shoots and their date ranges, tracking where they exist.
-    Returns a dict mapping shoot_name -> {
-        'date_range': (start_date, end_date),
-        'in_laptop': bool,
-        'in_archive': bool
-    }
-    """
-    shoots: dict[str, dict] = {}
-
-    if laptop_dest.exists():
-        for shoot_dir in laptop_dest.iterdir():
-            if shoot_dir.is_dir():
-                date_range = parse_shoot_date_range(shoot_dir.name)
-                if date_range:
-                    shoots[shoot_dir.name] = {
-                        "date_range": date_range,
-                        "in_laptop": True,
-                        "in_archive": False,
-                    }
-
-    archive_raw = raw_root(archive_dest, "video", layout)
-    if archive_raw.exists():
-        for shoot_dir in archive_raw.iterdir():
-            if shoot_dir.is_dir():
-                date_range = parse_shoot_date_range(shoot_dir.name)
-                if date_range:
-                    if shoot_dir.name in shoots:
-                        shoots[shoot_dir.name]["in_archive"] = True
-                    else:
-                        shoots[shoot_dir.name] = {
-                            "date_range": date_range,
-                            "in_laptop": False,
-                            "in_archive": True,
-                        }
-
-    return shoots
-
-
-def _find_matching_shoot(file_date_range: tuple, existing_shoots: dict) -> Optional[str]:
-    """
-    Find an existing shoot whose date range contains the file date range.
-    Returns shoot name or None.
-    """
-    file_start, file_end = file_date_range
-    for shoot_name, shoot_info in existing_shoots.items():
-        shoot_start, shoot_end = shoot_info["date_range"]
-        if shoot_start <= file_start and file_end <= shoot_end:
-            return shoot_name
-    return None
 
 
 def ingest_report(
