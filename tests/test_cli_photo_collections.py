@@ -56,6 +56,7 @@ def test_photo_ingest_lands_flat_with_sidecars_and_a_hidden_manifest(tmp_path, m
     _write(source / "DCIM" / "100MSDCF" / "DSC00811.xmp", b"lightroom-edits")
     _write(source / "DCIM" / "100MSDCF" / "DSC00812.ARW", b"second-frame")
     _write(source / "DCIM" / "100MSDCF" / "DSC00811.JPG", b"camera-preview")
+    _write(source / "DCIM" / "100MSDCF" / "notes.txt", b"scribbles")
     _write(source / "._DSC00811.ARW", b"appledouble")
 
     result = runner.invoke(
@@ -77,6 +78,7 @@ def test_photo_ingest_lands_flat_with_sidecars_and_a_hidden_manifest(tmp_path, m
         ".vflow-manifest.json",
         "DSC00811.ARW",
         "DSC00811.ARW.pp3",
+        "DSC00811.JPG",
         "DSC00811.xmp",
         "DSC00812.ARW",
     ]
@@ -97,8 +99,10 @@ def test_photo_ingest_lands_flat_with_sidecars_and_a_hidden_manifest(tmp_path, m
     assert entries["DSC00811.xmp"]["sidecar_for"] == "DSC00811.ARW"
     assert len(entries["DSC00811.xmp"]["checksum"]) == 64
 
+    assert entries["DSC00811.JPG"]["byte_size"] == len(b"camera-preview")
+
     excluded = {item["source_relative_path"]: item for item in manifest["excluded"]}
-    assert excluded["DCIM/100MSDCF/DSC00811.JPG"]["reason"] == "non-photo file type"
+    assert excluded["DCIM/100MSDCF/notes.txt"]["reason"] == "non-photo file type"
     assert excluded["._DSC00811.ARW"]["reason"] == "AppleDouble sidecar"
     assert "Retained copies: 1 (Archive only)" in result.output
 
@@ -364,3 +368,28 @@ def test_photo_ingest_leaves_hand_placed_collection_files_alone(tmp_path, monkey
     assert (collection / "DSC00001.ARW").read_bytes() == b"hand-placed"
     assert (collection / "DSC00001_b.ARW").read_bytes() == b"from-the-card"
     assert _manifest(collection)["collection"] == "20220612-20220619"
+
+
+def test_compressed_photos_ingest_as_originals(tmp_path, monkeypatch):
+    archive = _configure(tmp_path, monkeypatch)
+    source = tmp_path / "PHONE"
+    _write(source / "IMG_0001.HEIC", b"phone-shot")
+    _write(source / "IMG_0002.jpeg", b"pocket-camera")
+    _write(source / "IMG_0002.jpeg.pp3", b"jpeg-edits")
+
+    result = runner.invoke(
+        app,
+        ["photo-ingest", "--source", str(source), "--collection", "Lappis Park"],
+    )
+
+    assert result.exit_code == 0, result.output
+    collection = _collection(archive, "Lappis Park")
+    assert sorted(path.name for path in collection.iterdir()) == [
+        ".vflow-manifest.json",
+        "IMG_0001.HEIC",
+        "IMG_0002.jpeg",
+        "IMG_0002.jpeg.pp3",
+    ]
+    entries = {entry["name"]: entry for entry in _manifest(collection)["files"]}
+    assert len(entries["IMG_0001.HEIC"]["checksum"]) == 64
+    assert entries["IMG_0002.jpeg.pp3"]["sidecar_for"] == "IMG_0002.jpeg"
