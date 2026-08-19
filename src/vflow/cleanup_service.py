@@ -34,7 +34,7 @@ def _cleanup_plan(
     if not target.exists() or not target.is_dir():
         raise ValueError(f"Working Copy is unavailable: {target}")
 
-    _, entries = _load_checkout_entries(archive, shoot)
+    _, entries = _load_checkout_entries(archive, shoot, config.get_layout(app_config))
     files = []
     for entry in entries:
         archived = entry["source"]

@@ -7,7 +7,7 @@ import typer
 
 from .core.fs_ops import copy_and_verify, _format_bytes
 from .core.patterns import _matches_pattern
-from .shoot_manifest import PHOTO_EXTENSIONS
+from .shoot_manifest import Layout, PHOTO_EXTENSIONS, raw_label, raw_root
 
 
 def consolidate_files(
@@ -510,12 +510,13 @@ def card_verify(
     source_dir: str,
     archive_path: Path,
     photo_shoot: Optional[str] = None,
+    layout: Optional[Layout] = None,
 ) -> None:
     """
     Verifies card contents against the archive before formatting.
 
-    Videos are checked archive-wide (Video/RAW) by name+size.
-    Photos are checked against the specific Photo/RAW/<photo_shoot> folder only,
+    Videos are checked across the whole footage root by name+size.
+    Photos are checked against the one named Collection only,
     to avoid Sony filename-recycling false positives.
     """
     source_path = Path(source_dir)
@@ -528,6 +529,8 @@ def card_verify(
 
     video_extensions = {".mp4", ".mov", ".mxf", ".mts", ".avi", ".m4v", ".braw", ".r3d", ".crm"}
     photo_extensions = PHOTO_EXTENSIONS
+    video_label = raw_label("video", layout)
+    photo_label = raw_label("photo", layout)
 
     has_videos = video_folder.exists() and video_folder.is_dir()
     has_photos = photo_folder.exists() and photo_folder.is_dir()
@@ -546,7 +549,7 @@ def card_verify(
             if f.is_file() and f.suffix.lower() in video_extensions
         ]
 
-        archive_video_raw = archive_path / "Video" / "RAW"
+        archive_video_raw = raw_root(archive_path, "video", layout)
         archive_video_index: set[tuple[str, int]] = set()
         if archive_video_raw.exists():
             for f in archive_video_raw.rglob("*"):
@@ -570,7 +573,7 @@ def card_verify(
         if not video_pass:
             overall_pass = False
 
-        typer.echo(f"\nVIDEOS  (checked archive-wide under Video/RAW)")
+        typer.echo(f"\nVIDEOS  (checked archive-wide under {video_label})")
         typer.echo(f"  On card:       {len(video_files)}")
         typer.echo(f"  In archive:    {len(video_files) - len(missing_videos)}")
         typer.echo(f"  Missing:       {len(missing_videos)}")
@@ -594,7 +597,7 @@ def card_verify(
                 if f.is_file() and f.suffix.lower() in photo_extensions
             ]
 
-            shoot_photo_dir = archive_path / "Photo" / "RAW" / photo_shoot
+            shoot_photo_dir = raw_root(archive_path, "photo", layout) / photo_shoot
             shoot_photo_index: set[tuple[str, int]] = set()
             if shoot_photo_dir.exists():
                 for f in shoot_photo_dir.iterdir():
@@ -621,7 +624,7 @@ def card_verify(
             if not photo_pass:
                 overall_pass = False
 
-            typer.echo(f"\nPHOTOS  (checked against Photo/RAW/{photo_shoot} only)")
+            typer.echo(f"\nPHOTOS  (checked against {photo_label}/{photo_shoot} only)")
             typer.echo(f"  On card:       {len(photo_files)}")
             typer.echo(f"  In shoot:      {len(photo_files) - len(missing_photos)}")
             typer.echo(f"  Missing:       {len(missing_photos)}")

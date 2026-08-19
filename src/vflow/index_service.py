@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 import typer
 
+from .core.date_utils import manifest_date_range, media_date, record_media_dates
 from .shoot_manifest import (
-    RAW_SUBPATHS,
+    Layout,
     add_indexed_entry,
     covered_names,
+    folder_files,
     indexed_entry,
     is_partial,
     iter_raw_folders,
     load_manifest,
     manifest_source,
+    raw_label,
     raw_root,
     uncovered_files,
     write_json_atomically,
@@ -23,39 +26,37 @@ from .shoot_manifest import (
 KINDS = ("video", "photo")
 
 
-def raw_label(kind: str) -> str:
-    return "/".join(RAW_SUBPATHS[kind])
-
-
-def resolve_target(archive: Path, name: str) -> tuple[Path, str]:
+def resolve_target(
+    archive: Path, name: str, layout: Optional[Layout] = None
+) -> tuple[Path, str]:
     """Locate one Shoot or Collection by folder name or Archive-relative path."""
     if "/" in name:
         directory = archive / name
         for kind in KINDS:
-            if directory.parent == raw_root(archive, kind):
+            if directory.parent == raw_root(archive, kind, layout):
                 if not directory.is_dir():
                     raise ValueError(f"No folder at {name} in the Archive")
                 return directory, kind
-        roots = " or ".join(raw_label(kind) for kind in KINDS)
+        roots = " or ".join(raw_label(kind, layout) for kind in KINDS)
         raise ValueError(f"Indexing covers {roots} only; {name} sits elsewhere")
 
     matches = [
-        (raw_root(archive, kind) / name, kind)
+        (raw_root(archive, kind, layout) / name, kind)
         for kind in KINDS
-        if (raw_root(archive, kind) / name).is_dir()
+        if (raw_root(archive, kind, layout) / name).is_dir()
     ]
     if not matches:
-        roots = " or ".join(raw_label(kind) for kind in KINDS)
+        roots = " or ".join(raw_label(kind, layout) for kind in KINDS)
         raise ValueError(f"No Shoot or Collection named '{name}' under {roots}")
     if len(matches) > 1:
         raise ValueError(
             f"'{name}' names both a Shoot and a Collection; "
-            f"give an Archive-relative path such as {raw_label('video')}/{name}"
+            f"give an Archive-relative path such as {raw_label('video', layout)}/{name}"
         )
     return matches[0]
 
 
-def plan_folder(directory: Path, kind: str) -> dict:
+def plan_folder(archive: Path, directory: Path, kind: str) -> dict:
     """What one folder still needs hashed before its Shoot Manifest is complete."""
     manifest = load_manifest(directory, directory.name, kind)
     pending = uncovered_files(directory, manifest)
@@ -63,7 +64,7 @@ def plan_folder(directory: Path, kind: str) -> dict:
         "directory": directory,
         "kind": kind,
         "name": directory.name,
-        "location": directory.relative_to(directory.parent.parent.parent).as_posix(),
+        "location": directory.relative_to(archive).as_posix(),
         "manifest": manifest,
         "pending": pending,
         "files": len(pending),
@@ -88,6 +89,18 @@ def summarize(plan: dict, hashed: int, manifest_path: Path) -> dict:
     }
 
 
+def record_folder_dates(plan: dict) -> None:
+    """Record the capture-date span of one folder's contents in its manifest."""
+    directory = plan["directory"]
+    manifest = plan["manifest"]
+    before = manifest_date_range(manifest)
+    span = record_media_dates(
+        manifest, (media_date(directory / name) for name, _ in folder_files(directory))
+    )
+    if span is not None and span != before:
+        write_json_atomically(manifest_source(directory), manifest)
+
+
 def index_folder(plan: dict) -> dict:
     """Hash every uncovered file in one folder, saving progress after each one."""
     directory = plan["directory"]
@@ -109,6 +122,7 @@ def index_archive(
     names: Iterable[str] = (),
     all_folders: bool = False,
     dry_run: bool = False,
+    layout: Optional[Layout] = None,
 ) -> dict:
     """Give existing folders a complete Shoot Manifest without touching their contents."""
     names = list(names or [])
@@ -119,16 +133,16 @@ def index_archive(
         targets = [
             (directory, kind)
             for kind in KINDS
-            for directory in iter_raw_folders(archive, kind)
+            for directory in iter_raw_folders(archive, kind, layout)
         ]
     else:
         targets = []
         for name in names:
-            target = resolve_target(archive, name)
+            target = resolve_target(archive, name, layout)
             if target not in targets:
                 targets.append(target)
 
-    plans = [plan_folder(directory, kind) for directory, kind in targets]
+    plans = [plan_folder(archive, directory, kind) for directory, kind in targets]
     work = [plan for plan in plans if plan["pending"] or plan["partial"]]
     result = {
         "dry_run": dry_run,
@@ -143,6 +157,8 @@ def index_archive(
             summarize(plan, 0, manifest_source(plan["directory"])) for plan in work
         ]
         return result
+    for plan in plans:
+        record_folder_dates(plan)
     result["folders"] = [index_folder(plan) for plan in work]
     return result
 

@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from .core.date_utils import media_date, record_media_dates
 from .shoot_manifest import (
+    Layout,
     MANIFEST_NAME,
     PENDING_MANIFEST_NAME,
     PHOTO_EXTENSIONS,
@@ -22,6 +24,7 @@ from .shoot_manifest import (
     safe_identity,
     scan_unindexed,
     shoot_directory,
+    thumbnail_reason,
     write_json_atomically,
 )
 
@@ -45,7 +48,16 @@ def _exclusion_reason(relative: Path, attached: bool) -> Optional[str]:
         return None if attached else "editing sidecar without its photo"
     if suffix not in PHOTO_EXTENSIONS:
         return "non-photo file type"
-    return None
+    return thumbnail_reason(relative)
+
+
+def holds_photos(source: Path, files: list[Path]) -> bool:
+    """Whether any of a source's files belongs in a Collection. Sidecars ride photos, so they never count alone."""
+    return any(
+        path.suffix.lower() in PHOTO_EXTENSIONS
+        and _exclusion_reason(path.relative_to(source), attached=False) is None
+        for path in files
+    )
 
 
 def _attach_sidecars(candidates: list[tuple[Path, Path]]) -> dict[Path, tuple[Path, str]]:
@@ -91,12 +103,19 @@ class _Collection:
         self.manifest = manifest
         self.path = path
         self.taken = {entry["name"]: entry["checksum"] for entry in manifest["files"]}
+        # Capture dates of the card files landing here, read from the card because a
+        # copy carries the ingest moment as its birthtime.
+        self.dates: list = []
 
     def add(self, record: dict) -> None:
         self.manifest["files"].append(record)
         self.taken[record["name"]] = record["checksum"]
 
+    def note(self, source_file: Path) -> None:
+        self.dates.append(media_date(source_file))
+
     def save(self) -> None:
+        record_media_dates(self.manifest, self.dates)
         write_json_atomically(self.path, self.manifest)
 
 
@@ -106,6 +125,7 @@ def ingest_photos(
     collection: str,
     batch_id: Optional[str] = None,
     selected_files: Optional[list[Path]] = None,
+    layout: Optional[Layout] = None,
 ) -> dict:
     """Copy RAW photos and their editing sidecars into a flat Collection folder."""
     collection = safe_identity(collection, "Collection identity")
@@ -135,7 +155,7 @@ def ingest_photos(
         "Import Batch identity",
     )
 
-    collection_path = shoot_directory(archive, collection, "photo")
+    collection_path = shoot_directory(archive, collection, "photo", layout=layout)
     collection_path.mkdir(parents=True, exist_ok=True)
     manifest_path = collection_path / MANIFEST_NAME
     pending_path = collection_path / PENDING_MANIFEST_NAME
@@ -143,8 +163,8 @@ def ingest_photos(
     primary = _Collection(collection_path, manifest, pending_path)
     collections = {collection_path: primary}
 
-    index = build_checksum_index(archive, "photo")
-    unindexed = scan_unindexed(archive, "photo", skip=[collection_path])
+    index = build_checksum_index(archive, "photo", layout=layout)
+    unindexed = scan_unindexed(archive, "photo", skip=[collection_path], layout=layout)
     recorded = {
         (entry.get("batch_id"), entry.get("source_relative_path")): entry
         for entry in manifest["files"]
@@ -253,6 +273,7 @@ def ingest_photos(
             archived = collection_path / relative_path(entry["name"])
             if archived.is_file() and checksum(archived) == entry["checksum"]:
                 stored = entry["name"]
+                primary.note(source_file)
                 counts["verified"] += 1
             else:
                 manifest["files"].remove(entry)
@@ -310,6 +331,7 @@ def ingest_photos(
             if name != relative.name:
                 record["original_name"] = relative.name
             primary.add(record)
+            primary.note(source_file)
             index.setdefault(byte_size, {}).setdefault(
                 stored_checksum, (collection_path / name).relative_to(archive).as_posix()
             )

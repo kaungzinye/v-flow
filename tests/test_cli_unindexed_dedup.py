@@ -91,7 +91,7 @@ def test_unindexed_collection_content_deduplicates_a_card_photo(tmp_path, monkey
     source = tmp_path / "CARD"
     _write(source / "DSC09001.ARW", b"legacy-frame")
 
-    result = runner.invoke(app, ["photo-ingest", "-s", str(source), "-c", "Fresh"])
+    result = runner.invoke(app, ["ingest", "-s", str(source), "-n", "Fresh"])
 
     assert result.exit_code == 0, result.output
     assert "0 copied, 0 already verified, 1 deduplicated" in result.output
@@ -122,7 +122,7 @@ def test_same_name_and_size_photo_with_different_content_still_copies(tmp_path, 
     source = tmp_path / "CARD"
     _write(source / "DSC00001.ARW", b"BBBBBBBBBBB")
 
-    result = runner.invoke(app, ["photo-ingest", "-s", str(source), "-c", "Fresh"])
+    result = runner.invoke(app, ["ingest", "-s", str(source), "-n", "Fresh"])
 
     assert result.exit_code == 0, result.output
     assert (_collection(archive, "Fresh") / "DSC00001.ARW").read_bytes() == b"BBBBBBBBBBB"

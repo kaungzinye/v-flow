@@ -9,15 +9,15 @@ A creative editing effort that combines media from one or more Shoots and produc
 _Avoid_: Job folder, shoot project
 
 **Shoot**:
-Footage captured in a certain date range and stored as one named collection, held as one flat folder under `Video/RAW`. A Shoot receives one or more Import Batches and is independent of the Projects that use it.
+Footage captured in a certain date range and stored as one named collection, held as one flat folder under the configured footage root, `Video/RAW` by default. A Shoot receives one or more Import Batches and is independent of the Projects that use it.
 _Avoid_: Project, day folder
 
 **Import Batch**:
-The footage received from one camera card or source folder during a single ingest, recorded per file in the Shoot manifest.
+The media received from one camera card or source folder during a single ingest, recorded per file in every manifest that ingest writes. One card carrying both footage and photos records the same Import Batch into its Shoot Manifest and its Collection's manifest.
 _Avoid_: Batch folder, card folder
 
 **Shoot Manifest**:
-The hidden `.vflow-manifest.json` inside a Shoot or Collection folder. It records the checksum algorithm and, per file, its name, byte size, checksum, card-relative path, Import Batch, and ingest time, plus the files excluded or deduplicated during ingest.
+The hidden `.vflow-manifest.json` inside a Shoot or Collection folder. It records the checksum algorithm and, per file, its name, byte size, checksum, card-relative path, Import Batch, and ingest time, plus the files excluded or deduplicated during ingest and the capture-date span its folder's contents cover.
 _Avoid_: Sidecar, index
 
 **Partial Shoot Manifest**:
@@ -29,7 +29,7 @@ Hashing the files already sitting in a Shoot or Collection folder to give it a c
 _Avoid_: Scan, import, migration
 
 **Collection**:
-A freely named group of photos held as one flat folder under `Photo/RAW`, together with their editing sidecars and a Shoot Manifest. Collections are named by event or trip, are independent of footage Shoots, and are never renamed by v-flow.
+A freely named group of photos held as one flat folder under the configured photo root, `Photo/RAW` by default, together with their editing sidecars and a Shoot Manifest. A Collection takes the name of the Shoot its card fed, and an explicit Collection name overrides that. A Collection is its own folder with its own manifest, so it stands on its own where no footage exists, and v-flow never renames one.
 _Avoid_: Photo shoot, album, day folder
 
 **Camera Original**:

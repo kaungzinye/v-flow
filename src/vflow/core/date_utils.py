@@ -1,22 +1,24 @@
 from __future__ import annotations
 
-from datetime import date, datetime
-from typing import Optional, Tuple
 import re
+from datetime import date, datetime
+from pathlib import Path
+from typing import Iterable, Optional, Tuple
+
+# Where a manifest records the capture-date span of the folder it describes.
+MEDIA_DATES_KEY = "media_dates"
+
+DateRange = Tuple[date, date]
 
 
 def parse_shoot_date_range(shoot_name: str) -> Optional[Tuple[date, date]]:
     """
-    Parse a shoot name to extract date range.
-    Returns (start_date, end_date) or None if no date found.
+    Parse a folder name into its date range.
+    Returns (start_date, end_date) or None if the name carries no date.
 
-    Supports formats:
-    - YYYY-MM-DD_ShootName (single date)
-    - YYYY-MM-DD_to_YYYY-MM-DD_ShootName (date range)
+    Supports YYYY-MM-DD_Name and YYYY-MM-DD_to_YYYY-MM-DD_Name.
     """
-    # Pattern for date range: YYYY-MM-DD_to_YYYY-MM-DD_ShootName
-    range_pattern = r"^(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})_(.+)$"
-    match = re.match(range_pattern, shoot_name)
+    match = re.match(r"^(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})_(.+)$", shoot_name)
     if match:
         try:
             start = datetime.strptime(match.group(1), "%Y-%m-%d").date()
@@ -25,9 +27,7 @@ def parse_shoot_date_range(shoot_name: str) -> Optional[Tuple[date, date]]:
         except ValueError:
             pass
 
-    # Pattern for single date: YYYY-MM-DD_ShootName
-    single_pattern = r"^(\d{4}-\d{2}-\d{2})_(.+)$"
-    match = re.match(single_pattern, shoot_name)
+    match = re.match(r"^(\d{4}-\d{2}-\d{2})_(.+)$", shoot_name)
     if match:
         try:
             shoot_date = datetime.strptime(match.group(1), "%Y-%m-%d").date()
@@ -54,61 +54,71 @@ def format_shoot_name(
         )
 
 
-def date_in_range(check_date: date, start_date: date, end_date: date) -> bool:
-    """Check if a date falls within a date range (inclusive)."""
-    return start_date <= check_date <= end_date
-
-
-def cluster_files_by_date(
-    files_with_dates: list[Tuple[object, datetime]], gap_hours: int
-) -> list[list[object]]:
+def media_datetime(file_path: Path) -> datetime:
     """
-    Group files into clusters based on a time gap threshold.
-    files_with_dates: List of tuples (file_path, file_date)
-    gap_hours: Minimum gap in hours to trigger a split
-
-    Returns a list of lists, where each inner list contains file paths for one cluster.
+    Extract the date/time from a media file.
+    Uses filesystem creation date (birthtime) if available, else modification time.
     """
-    if not files_with_dates:
-        return []
+    try:
+        stat = file_path.stat()
+        creation_time = getattr(stat, "st_birthtime", None)
+        if creation_time:
+            return datetime.fromtimestamp(creation_time)
+        return datetime.fromtimestamp(stat.st_mtime)
+    except Exception:
+        return datetime.now()
 
-    # Sort by date
-    sorted_files = sorted(files_with_dates, key=lambda x: x[1])
 
-    clusters: list[list[object]] = []
-    current_cluster: list[object] = []
+def media_date(file_path: Path) -> date:
+    """The capture day of one media file."""
+    return media_datetime(file_path).date()
 
-    if not sorted_files:
-        return []
 
-    # Start first cluster
-    current_cluster.append(sorted_files[0][0])
-    last_date = sorted_files[0][1]
+def _parse_date(text: object) -> Optional[date]:
+    if not isinstance(text, str):
+        return None
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
-    for i in range(1, len(sorted_files)):
-        file_path, file_date = sorted_files[i]
 
-        # Calculate difference in hours
-        # Ensure we are comparing datetimes
-        if isinstance(file_date, date) and not isinstance(file_date, datetime):
-            # Fallback if we only have dates (assume midnight)
-            file_date = datetime.combine(file_date, datetime.min.time())
-        if isinstance(last_date, date) and not isinstance(last_date, datetime):
-            last_date = datetime.combine(last_date, datetime.min.time())
+def manifest_date_range(manifest: dict) -> Optional[DateRange]:
+    """The capture-date span a manifest records, or None when it records none."""
+    recorded = manifest.get(MEDIA_DATES_KEY)
+    if not isinstance(recorded, dict):
+        return None
+    start = _parse_date(recorded.get("start"))
+    end = _parse_date(recorded.get("end"))
+    if start is None or end is None or start > end:
+        return None
+    return (start, end)
 
-        diff = file_date - last_date
-        diff_hours = diff.total_seconds() / 3600
 
-        if diff_hours >= gap_hours:
-            # Gap exceeded, start new cluster
-            clusters.append(current_cluster)
-            current_cluster = []
+def record_media_dates(manifest: dict, dates: Iterable[date]) -> Optional[DateRange]:
+    """Grow a manifest's recorded span to cover the given capture dates."""
+    days = sorted(dates)
+    known = manifest_date_range(manifest)
+    if not days:
+        return known
+    start, end = days[0], days[-1]
+    if known is not None:
+        start, end = min(start, known[0]), max(end, known[1])
+    manifest[MEDIA_DATES_KEY] = {
+        "start": start.strftime("%Y-%m-%d"),
+        "end": end.strftime("%Y-%m-%d"),
+    }
+    return (start, end)
 
-        current_cluster.append(file_path)
-        last_date = file_date
 
-    if current_cluster:
-        clusters.append(current_cluster)
+def ranges_overlap(left: DateRange, right: DateRange) -> bool:
+    """Whether two inclusive date ranges share at least one day."""
+    return left[0] <= right[1] and right[0] <= left[1]
 
-    return clusters
 
+def format_date_range(span: DateRange) -> str:
+    """One date range as a person reads it."""
+    start, end = span
+    if start == end:
+        return start.strftime("%Y-%m-%d")
+    return f"{start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')}"

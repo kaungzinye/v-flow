@@ -1,0 +1,14 @@
+{
+  "name": "v-flow",
+  "owner": {
+    "name": "Kaung",
+    "url": "https://github.com/kaungzinye"
+  },
+  "plugins": [
+    {
+      "name": "vflow",
+      "source": "./",
+      "description": "Store and move video footage and photos safely: checksum-verified card ingest into an archive, working copies for editing, Resolve-aware finish and cleanup."
+    }
+  ]
+}

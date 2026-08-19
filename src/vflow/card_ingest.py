@@ -5,9 +5,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from .core.date_utils import media_date, record_media_dates
 from .shoot_manifest import (
     EXTRAS_DIRECTORY,
     FOOTAGE_EXTENSIONS,
+    Layout,
     MANIFEST_NAME,
     PENDING_MANIFEST_NAME,
     batch_identity,
@@ -21,6 +23,7 @@ from .shoot_manifest import (
     safe_identity,
     scan_unindexed,
     shoot_directory,
+    thumbnail_reason,
     write_json_atomically,
 )
 
@@ -33,9 +36,17 @@ def _exclusion_reason(relative: Path) -> Optional[str]:
         return "AppleDouble sidecar"
     if name.startswith("."):
         return "hidden file"
+    thumbnail = thumbnail_reason(relative)
+    if thumbnail is not None:
+        return thumbnail
     if relative.suffix.lower() not in FOOTAGE_EXTENSIONS:
         return "non-footage file type"
     return None
+
+
+def holds_footage(source: Path, files: list[Path]) -> bool:
+    """Whether any of a source's files belongs in a Shoot."""
+    return any(_exclusion_reason(path.relative_to(source)) is None for path in files)
 
 
 def ingest_card(
@@ -45,6 +56,7 @@ def ingest_card(
     batch_id: Optional[str] = None,
     selected_files: Optional[list[Path]] = None,
     include_all: bool = False,
+    layout: Optional[Layout] = None,
 ) -> dict:
     """Copy footage from one card into a flat Shoot folder backed by a hidden manifest."""
     shoot = safe_identity(shoot, "Shoot identity")
@@ -67,14 +79,14 @@ def ingest_card(
         "Import Batch identity",
     )
 
-    shoot_path = shoot_directory(archive, shoot)
+    shoot_path = shoot_directory(archive, shoot, layout=layout)
     shoot_path.mkdir(parents=True, exist_ok=True)
     manifest_path = shoot_path / MANIFEST_NAME
     pending_path = shoot_path / PENDING_MANIFEST_NAME
     manifest = load_manifest(shoot_path, shoot)
 
-    index = build_checksum_index(archive)
-    unindexed = scan_unindexed(archive, "video", skip=[shoot_path])
+    index = build_checksum_index(archive, layout=layout)
+    unindexed = scan_unindexed(archive, "video", skip=[shoot_path], layout=layout)
     recorded = {
         (entry.get("batch_id"), entry.get("source_relative_path")): entry
         for entry in manifest["files"]
@@ -85,8 +97,12 @@ def ingest_card(
     verified = 0
     deduplicated = 0
     excluded = 0
+    # Capture dates of the card files that land in this Shoot, read from the card
+    # because a copy carries the ingest moment as its birthtime.
+    landed: list = []
 
     def save_progress() -> None:
+        record_media_dates(manifest, landed)
         write_json_atomically(pending_path, manifest)
 
     for relative, source_file in candidates:
@@ -127,6 +143,7 @@ def ingest_card(
         if entry is not None:
             archived = shoot_path / relative_path(entry["name"])
             if archived.is_file() and checksum(archived) == entry["checksum"]:
+                landed.append(media_date(source_file))
                 verified += 1
                 continue
             manifest["files"].remove(entry)
@@ -183,6 +200,7 @@ def ingest_card(
         if name != relative.name:
             record["original_name"] = relative.name
         manifest["files"].append(record)
+        landed.append(media_date(source_file))
         taken[name] = stored_checksum
         index.setdefault(byte_size, {}).setdefault(
             stored_checksum, (shoot_path / name).relative_to(archive).as_posix()
@@ -190,7 +208,7 @@ def ingest_card(
         copied += 1
         save_progress()
 
-    write_json_atomically(pending_path, manifest)
+    save_progress()
     os.replace(pending_path, manifest_path)
 
     return {

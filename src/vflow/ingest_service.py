@@ -7,81 +7,97 @@ from typing import Optional
 import typer
 
 from .core.date_utils import (
-    parse_shoot_date_range,
+    DateRange,
+    format_date_range,
     format_shoot_name,
+    manifest_date_range,
+    media_datetime,
+    parse_shoot_date_range,
+    ranges_overlap,
 )
 from .core.patterns import _extract_number_from_filename, _matches_pattern
-from .card_ingest import ingest_card
-from .collection_ingest import ingest_photos
-from .shoot_manifest import PHOTO_EXTENSIONS
+from .card_ingest import holds_footage, ingest_card
+from .collection_ingest import holds_photos, ingest_photos
+from .shoot_manifest import (
+    Layout,
+    PENDING_MANIFEST_NAME,
+    MANIFEST_NAME,
+    PHOTO_EXTENSIONS,
+    iter_raw_folders,
+    raw_root,
+    read_manifest,
+)
 
 
 def _get_media_date(file_path: Path) -> datetime:
+    """The capture date/time of one media file."""
+    return media_datetime(file_path)
+
+
+def _folder_range(directory: Path) -> Optional[DateRange]:
+    """The date range a folder answers for: its manifest's, else the one its name states.
+
+    A manifested folder speaks only through its manifest, so a folder indexed before
+    v-flow recorded ranges stays unmatched until `v-flow index` runs again.
     """
-    Extract the date/time from a media file.
-    Uses filesystem creation date (birthtime) if available, else modification time.
+    for name in (PENDING_MANIFEST_NAME, MANIFEST_NAME):
+        manifest = read_manifest(directory / name)
+        if manifest is not None:
+            return manifest_date_range(manifest)
+    return parse_shoot_date_range(directory.name)
+
+
+def overlapping_folders(
+    archive: Path, kind: str, span: DateRange, layout: Optional[Layout] = None
+) -> list[tuple[str, DateRange]]:
+    """Existing folders of one media kind whose date range meets the incoming files."""
+    found = []
+    for directory in iter_raw_folders(archive, kind, layout):
+        recorded = _folder_range(directory)
+        if recorded is not None and ranges_overlap(recorded, span):
+            found.append((directory.name, recorded))
+    return found
+
+
+def suggest_folder(
+    archive: Path,
+    kind: str,
+    label: str,
+    span: DateRange,
+    derived: str,
+    layout: Optional[Layout] = None,
+) -> str:
+    """Offer one date-overlapping folder to merge into, falling back to the derived name.
+
+    One candidate is a question; several are ambiguous, so v-flow lists them and asks
+    nothing. Declining, like ambiguity, means the derived name.
     """
-    try:
-        stat = file_path.stat()
-        creation_time = getattr(stat, "st_birthtime", None)
-        if creation_time:
-            return datetime.fromtimestamp(creation_time)
-        return datetime.fromtimestamp(stat.st_mtime)
-    except Exception:
-        return datetime.now()
+    candidates = [
+        (name, recorded)
+        for name, recorded in overlapping_folders(archive, kind, span, layout)
+        if name != derived
+    ]
+    if not candidates:
+        return derived
 
+    if len(candidates) > 1:
+        typer.echo(
+            f"These {label}s overlap {format_date_range(span)}, "
+            f"so v-flow chooses none of them:"
+        )
+        for name, recorded in candidates:
+            typer.echo(f"  {name} ({format_date_range(recorded)})")
+        typer.echo(f"Using {label} '{derived}'. Name one with the matching option to merge.")
+        return derived
 
-def _find_existing_shoots(laptop_dest: Path, archive_dest: Path) -> dict:
-    """
-    Find all existing shoots and their date ranges, tracking where they exist.
-    Returns a dict mapping shoot_name -> {
-        'date_range': (start_date, end_date),
-        'in_laptop': bool,
-        'in_archive': bool
-    }
-    """
-    shoots: dict[str, dict] = {}
-
-    if laptop_dest.exists():
-        for shoot_dir in laptop_dest.iterdir():
-            if shoot_dir.is_dir():
-                date_range = parse_shoot_date_range(shoot_dir.name)
-                if date_range:
-                    shoots[shoot_dir.name] = {
-                        "date_range": date_range,
-                        "in_laptop": True,
-                        "in_archive": False,
-                    }
-
-    archive_raw = archive_dest / "Video" / "RAW"
-    if archive_raw.exists():
-        for shoot_dir in archive_raw.iterdir():
-            if shoot_dir.is_dir():
-                date_range = parse_shoot_date_range(shoot_dir.name)
-                if date_range:
-                    if shoot_dir.name in shoots:
-                        shoots[shoot_dir.name]["in_archive"] = True
-                    else:
-                        shoots[shoot_dir.name] = {
-                            "date_range": date_range,
-                            "in_laptop": False,
-                            "in_archive": True,
-                        }
-
-    return shoots
-
-
-def _find_matching_shoot(file_date_range: tuple, existing_shoots: dict) -> Optional[str]:
-    """
-    Find an existing shoot whose date range contains the file date range.
-    Returns shoot name or None.
-    """
-    file_start, file_end = file_date_range
-    for shoot_name, shoot_info in existing_shoots.items():
-        shoot_start, shoot_end = shoot_info["date_range"]
-        if shoot_start <= file_start and file_end <= shoot_end:
-            return shoot_name
-    return None
+    name, recorded = candidates[0]
+    merge = typer.confirm(
+        f"{label} '{name}' ({format_date_range(recorded)}) overlaps these files "
+        f"({format_date_range(span)}). Add them to it "
+        f"instead of a new {label} '{derived}'?",
+        default=False,
+    )
+    return name if merge else derived
 
 
 def ingest_report(
@@ -90,6 +106,7 @@ def ingest_report(
     laptop_path: Optional[Path] = None,
     priority_day: Optional[int] = None,
     priority_month: Optional[int] = None,
+    layout: Optional[Layout] = None,
 ) -> None:
     """
     Scans SD card (or source) for video files, compares against BOTH laptop ingest
@@ -131,7 +148,7 @@ def ingest_report(
                 except (OSError, FileNotFoundError):
                     pass
 
-    archive_raw = archive_path / "Video" / "RAW"
+    archive_raw = raw_root(archive_path, "video", layout)
     archive_index: set[tuple[str, int]] = set()
     if archive_raw.exists():
         for f in archive_raw.rglob("*"):
@@ -245,16 +262,37 @@ def ingest_report(
     typer.echo("")
 
 
-def ingest_shoot(
+def _abort(error: Exception) -> typer.Exit:
+    typer.echo(f"Ingest failed: {error}", err=True)
+    typer.echo(
+        "Verified Archive files remain intact; retry the same ingest to resume.",
+        err=True,
+    )
+    return typer.Exit(code=1)
+
+
+def _summarize(result: dict, kind: str) -> None:
+    typer.echo(
+        f"Import Batch '{result['batch_id']}': "
+        f"{result['copied']} copied, {result['verified']} already verified, "
+        f"{result['deduplicated']} deduplicated, {result['excluded']} excluded, "
+        f"{result['files']} in {kind}."
+    )
+    typer.echo(f"Manifest: {result['manifest_path']}")
+
+
+def ingest_media(
     source_dir: str,
     shoot_name: str,
     archive_dest: Path,
     auto: bool = False,
+    collection_name: Optional[str] = None,
     files_filter: Optional[list[str]] = None,
     import_batch_id: Optional[str] = None,
     include_all: bool = False,
+    layout: Optional[Layout] = None,
 ) -> None:
-    """Copy footage from one card into a flat, checksum-verified Shoot folder."""
+    """Copy one card's footage into a flat Shoot and its photos into a flat Collection."""
     source_path = Path(source_dir)
     if not source_path.exists() or not source_path.is_dir():
         typer.echo(f"Source directory not found: {source_path}", err=True)
@@ -281,103 +319,75 @@ def ingest_shoot(
         typer.echo("No files found in the source directory.", err=True)
         raise typer.Exit(code=1)
 
+    span: Optional[DateRange] = None
     target_shoot_name = shoot_name
     if auto:
         dates = [_get_media_date(path) for path in files_for_identity]
-        target_shoot_name = format_shoot_name(
-            min(dates).date(), max(dates).date(), "Ingest"
-        )
+        span = (min(dates).date(), max(dates).date())
+        target_shoot_name = format_shoot_name(span[0], span[1], "Ingest")
     if not target_shoot_name:
         typer.echo("Shoot name is required when --auto is not used.", err=True)
         raise typer.Exit(code=1)
 
-    typer.echo(f"Archiving footage into Shoot '{target_shoot_name}'...")
-    try:
-        result = ingest_card(
-            source=source_path,
-            archive=archive_dest,
-            shoot=target_shoot_name,
-            batch_id=import_batch_id,
-            selected_files=selected_files,
-            include_all=include_all,
-        )
-    except (OSError, ValueError) as error:
-        typer.echo(f"Ingest failed: {error}", err=True)
-        typer.echo(
-            "Verified Archive files remain intact; retry the same ingest to resume.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-    typer.echo(f"Shoot folder: {result['shoot_directory']}")
-    typer.echo(
-        f"Import Batch '{result['batch_id']}': "
-        f"{result['copied']} copied, {result['verified']} already verified, "
-        f"{result['deduplicated']} deduplicated, {result['excluded']} excluded, "
-        f"{result['files']} in Shoot."
-    )
-    typer.echo(f"Manifest: {result['manifest_path']}")
-    typer.echo("Retained copies: 1 (Archive only). The source remains untouched.")
-
-
-def photo_ingest(
-    source_dir: str,
-    collection_name: str,
-    archive_path: Path,
-    files_filter: Optional[list[str]] = None,
-    import_batch_id: Optional[str] = None,
-) -> None:
-    """Copy RAW photos and their editing sidecars into a flat, checksum-verified Collection."""
-    source_path = Path(source_dir)
-    if not source_path.exists() or not source_path.is_dir():
-        typer.echo(f"Source directory not found: {source_path}", err=True)
+    footage = holds_footage(source_path, files_for_identity)
+    photos = holds_photos(source_path, files_for_identity)
+    if not footage and not photos:
+        typer.echo("No footage or photos found in the source directory.", err=True)
         raise typer.Exit(code=1)
 
-    selected_files: Optional[list[Path]] = None
-    if files_filter:
-        all_source_files = [path for path in source_path.rglob("*") if path.is_file()]
-        selected_files = []
-        for pattern in files_filter:
-            selected_files.extend(
-                path for path in all_source_files if _matches_pattern(pattern, path.name)
+    # A name given on the command line is the decision, so only --auto asks.
+    if span is not None and footage:
+        target_shoot_name = suggest_folder(
+            archive_dest, "video", "Shoot", span, target_shoot_name, layout
+        )
+
+    # The Collection carries the Shoot's name so one card lands under one identity.
+    target_collection_name = collection_name or target_shoot_name
+    if span is not None and photos and not collection_name:
+        target_collection_name = suggest_folder(
+            archive_dest, "photo", "Collection", span, target_collection_name, layout
+        )
+
+    if footage:
+        typer.echo(f"Archiving footage into Shoot '{target_shoot_name}'...")
+        try:
+            result = ingest_card(
+                source=source_path,
+                archive=archive_dest,
+                shoot=target_shoot_name,
+                batch_id=import_batch_id,
+                selected_files=selected_files,
+                include_all=include_all,
+                layout=layout,
             )
-        selected_files = list(dict.fromkeys(selected_files))
-        if not selected_files:
-            typer.echo(
-                f"No files found matching filter: {', '.join(files_filter)}",
-                err=True,
-            )
-            raise typer.Exit(code=1)
+        except (OSError, ValueError) as error:
+            raise _abort(error)
+        typer.echo(f"Shoot folder: {result['shoot_directory']}")
+        _summarize(result, "Shoot")
 
-    typer.echo(f"Archiving photos into Collection '{collection_name}'...")
-    try:
-        result = ingest_photos(
-            source=source_path,
-            archive=archive_path,
-            collection=collection_name,
-            batch_id=import_batch_id,
-            selected_files=selected_files,
-        )
-    except (OSError, ValueError) as error:
-        typer.echo(f"Photo ingest failed: {error}", err=True)
-        typer.echo(
-            "Verified Archive files remain intact; retry the same ingest to resume.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-    typer.echo(f"Collection folder: {result['collection_directory']}")
-    typer.echo(
-        f"Import Batch '{result['batch_id']}': "
-        f"{result['copied']} copied, {result['verified']} already verified, "
-        f"{result['deduplicated']} deduplicated, {result['excluded']} excluded, "
-        f"{result['files']} in Collection."
-    )
-    typer.echo(f"Manifest: {result['manifest_path']}")
+    if photos:
+        typer.echo(f"Archiving photos into Collection '{target_collection_name}'...")
+        try:
+            result = ingest_photos(
+                source=source_path,
+                archive=archive_dest,
+                collection=target_collection_name,
+                batch_id=import_batch_id,
+                selected_files=selected_files,
+                layout=layout,
+            )
+        except (OSError, ValueError) as error:
+            raise _abort(error)
+        typer.echo(f"Collection folder: {result['collection_directory']}")
+        _summarize(result, "Collection")
+
     typer.echo("Retained copies: 1 (Archive only). The source remains untouched.")
 
 
 def card_report(
     source_dir: str,
     archive_path: Path,
+    layout: Optional[Layout] = None,
 ) -> None:
     """
     Reports what's on a card. Auto-detects video (private/M4ROOT/CLIP) and photo
@@ -401,7 +411,7 @@ def card_report(
     typer.echo(f"Card: {source_path}")
 
     # Build archive-wide video index for presence check
-    archive_video_raw = archive_path / "Video" / "RAW"
+    archive_video_raw = raw_root(archive_path, "video", layout)
     archive_video_index: set[tuple[str, int]] = set()
     if archive_video_raw.exists():
         for f in archive_video_raw.rglob("*"):
