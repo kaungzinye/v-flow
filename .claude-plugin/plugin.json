@@ -1,7 +1,7 @@
 {
   "name": "vflow",
   "description": "Store and move video footage and photos safely: checksum-verified card ingest into an archive, working copies for editing, Resolve-aware finish and cleanup.",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "author": {
     "name": "Kaung",
     "email": "kaungzinye@gmail.com",
