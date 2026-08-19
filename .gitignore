@@ -14,3 +14,4 @@ build/
 
 # IDE / user-specific
 UserSystem/
+.test-venv/
