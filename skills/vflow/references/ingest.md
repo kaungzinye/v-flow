@@ -10,7 +10,7 @@ A Shoot is footage captured in a certain date range, held as one flat folder at 
 
    Complete when one source and one Shoot are unambiguous.
 
-2. State what lands where: footage files (video and audio) go straight into the Shoot folder, and photos go straight into the Collection folder with their editing sidecars (`.pp3`, `.xmp`) beside them — including when `--files` selects the photo. Camera sidecars, thumbnails, card databases, and hidden files stay on the card and are listed in a manifest with a reason. Offer `--include-all` when the user wants those files preserved too; they go into a hidden folder inside the Shoot so the Shoot folder itself stays flat.
+2. State what lands where: footage files (video and audio) go straight into the Shoot folder, and photos go straight into the Collection folder with their editing sidecars (`.pp3`, `.xmp`) beside them — including when `--files` selects the photo. Camera sidecars, thumbnails, card databases, and hidden files stay on the card and are listed in a manifest with a reason. A compressed image inside a camera thumbnail directory is a preview, never a photo, so it never reaches a Collection. Offer `--include-all` when the user wants those files preserved too; they go into a hidden folder inside the Shoot so the Shoot folder itself stays flat.
 
    State that a card without footage creates no Shoot and a card without photos creates no Collection.
 

@@ -61,6 +61,19 @@ PHOTO_EXTENSIONS = frozenset(
 )
 SIDECAR_EXTENSIONS = frozenset(PHOTO_EXTENSION_GROUPS["sidecar"])
 
+# Card directories holding camera-generated preview images. Add a camera's
+# thumbnail directory name here to keep its previews out of Collections.
+THUMBNAIL_DIRECTORIES = {"thmbnl"}
+
+
+def thumbnail_reason(relative: Path) -> Optional[str]:
+    """Why a card file counts as a camera preview rather than a photo, if it does."""
+    if relative.suffix.lower() not in PHOTO_EXTENSION_GROUPS["compressed"]:
+        return None
+    if any(part.lower() in THUMBNAIL_DIRECTORIES for part in relative.parts[:-1]):
+        return "camera thumbnail"
+    return None
+
 
 def raw_root(archive: Path, kind: str = "video") -> Path:
     """Directory holding every flat folder of one media kind."""

@@ -21,6 +21,7 @@ from .shoot_manifest import (
     safe_identity,
     scan_unindexed,
     shoot_directory,
+    thumbnail_reason,
     write_json_atomically,
 )
 
@@ -33,6 +34,9 @@ def _exclusion_reason(relative: Path) -> Optional[str]:
         return "AppleDouble sidecar"
     if name.startswith("."):
         return "hidden file"
+    thumbnail = thumbnail_reason(relative)
+    if thumbnail is not None:
+        return thumbnail
     if relative.suffix.lower() not in FOOTAGE_EXTENSIONS:
         return "non-footage file type"
     return None

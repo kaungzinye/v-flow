@@ -22,6 +22,7 @@ from .shoot_manifest import (
     safe_identity,
     scan_unindexed,
     shoot_directory,
+    thumbnail_reason,
     write_json_atomically,
 )
 
@@ -45,14 +46,14 @@ def _exclusion_reason(relative: Path, attached: bool) -> Optional[str]:
         return None if attached else "editing sidecar without its photo"
     if suffix not in PHOTO_EXTENSIONS:
         return "non-photo file type"
-    return None
+    return thumbnail_reason(relative)
 
 
 def holds_photos(source: Path, files: list[Path]) -> bool:
     """Whether any of a source's files belongs in a Collection. Sidecars ride photos, so they never count alone."""
     return any(
         path.suffix.lower() in PHOTO_EXTENSIONS
-        and _hidden_reason(path.relative_to(source)) is None
+        and _exclusion_reason(path.relative_to(source), attached=False) is None
         for path in files
     )
 

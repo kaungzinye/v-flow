@@ -185,6 +185,56 @@ def test_a_source_holding_neither_footage_nor_photos_stops_the_ingest(tmp_path, 
     assert not (archive / "Photo").exists()
 
 
+def test_camera_thumbnails_stay_out_of_a_collection(tmp_path, monkeypatch):
+    archive = _configure(tmp_path, monkeypatch)
+    source = tmp_path / "CARD"
+    _write(source / "PRIVATE" / "M4ROOT" / "CLIP" / "C6634.MP4", b"first-clip")
+    _write(source / "PRIVATE" / "M4ROOT" / "THMBNL" / "C6634T01.JPG", b"thumb")
+
+    result = runner.invoke(app, ["ingest", "-s", str(source), "-n", "Footage Only"])
+
+    assert result.exit_code == 0, result.output
+    assert not (archive / "Photo").exists()
+    excluded = {
+        item["source_relative_path"]: item
+        for item in _manifest(_shoot(archive, "Footage Only"))["excluded"]
+    }
+    assert excluded["PRIVATE/M4ROOT/THMBNL/C6634T01.JPG"]["reason"] == "camera thumbnail"
+
+
+def test_a_card_photo_still_ingests_beside_its_thumbnails(tmp_path, monkeypatch):
+    archive = _configure(tmp_path, monkeypatch)
+    source = tmp_path / "CARD"
+    _write(source / "PRIVATE" / "M4ROOT" / "CLIP" / "C6634.MP4", b"first-clip")
+    _write(source / "PRIVATE" / "M4ROOT" / "THMBNL" / "C6634T01.JPG", b"thumb")
+    _write(source / "DCIM" / "100MSDCF" / "DSC00811.JPG", b"real-frame")
+
+    result = runner.invoke(app, ["ingest", "-s", str(source), "-n", "Stockholm"])
+
+    assert result.exit_code == 0, result.output
+    collection = _collection(archive, "Stockholm")
+    assert _names(collection) == [".vflow-manifest.json", "DSC00811.JPG"]
+    excluded = {
+        item["source_relative_path"]: item for item in _manifest(collection)["excluded"]
+    }
+    assert excluded["PRIVATE/M4ROOT/THMBNL/C6634T01.JPG"]["reason"] == "camera thumbnail"
+
+
+def test_include_all_still_preserves_camera_thumbnails(tmp_path, monkeypatch):
+    archive = _configure(tmp_path, monkeypatch)
+    source = tmp_path / "CARD"
+    _write(source / "PRIVATE" / "M4ROOT" / "CLIP" / "C6634.MP4", b"first-clip")
+    _write(source / "PRIVATE" / "M4ROOT" / "THMBNL" / "C6634T01.JPG", b"thumb")
+
+    result = runner.invoke(
+        app, ["ingest", "-s", str(source), "-n", "Footage Only", "--include-all"]
+    )
+
+    assert result.exit_code == 0, result.output
+    extras = _shoot(archive, "Footage Only") / ".vflow-extras"
+    assert (extras / "PRIVATE" / "M4ROOT" / "THMBNL" / "C6634T01.JPG").read_bytes() == b"thumb"
+
+
 def test_a_files_filter_selects_across_both_kinds_and_keeps_sidecars(tmp_path, monkeypatch):
     archive = _configure(tmp_path, monkeypatch)
     source = tmp_path / "CARD"
