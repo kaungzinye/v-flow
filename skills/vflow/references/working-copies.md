@@ -42,14 +42,20 @@ A **Working Copy** is a temporary, verified copy of archived footage on a laptop
 
    Complete when Archive checksums pass and Resolve media is confirmed or listed for relinking.
 
-3. Summarize the Resolve effects and exact files planned for deletion. After approval, run the same command without `--dry-run` and let the CLI request final confirmation.
+3. Summarize the Resolve effects and exact files planned for deletion. Obtain the user's approval in words, then run the same command without `--dry-run` and with `--confirm`, which answers the deletion confirmation gate:
+
+   ```bash
+   v-flow cleanup --shoot <shoot> --working-location <name> --project <project> --confirm
+   ```
+
+   Without `--confirm` the CLI stops and names the flag rather than deleting anything, so never pass it before the user has approved the file list.
 
    Complete when deleted and failed counts account for every planned file.
 
-Use `--skip-resolve-validation` only when the user explicitly accepts that one risk. Archive verification and final confirmation still apply.
+Use `--skip-resolve-validation` only when the user explicitly accepts that one risk. Archive verification and `--confirm` still apply.
 
 ## Safety gates
 
 - Keep Archive contents in place.
 - Stop Checkout on a content conflict or insufficient drive capacity.
-- Stop Cleanup on an Archive target, checksum failure, unresolved Resolve media, unavailable Resolve, or declined confirmation.
+- Stop Cleanup on an Archive target, checksum failure, unresolved Resolve media, unavailable Resolve, or a deletion the user has not approved with `--confirm`.

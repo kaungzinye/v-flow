@@ -8,6 +8,7 @@ import yaml
 from typer.testing import CliRunner
 
 from vflow import config as vflow_config
+from vflow import prompts as vflow_prompts
 from vflow.main import app
 
 
@@ -82,6 +83,11 @@ def _shoot_names(archive: Path) -> list[str]:
     return sorted(path.name for path in (archive / "Video" / "RAW").iterdir())
 
 
+def _at_a_terminal(monkeypatch) -> None:
+    """Answer the run's questions the way a person at the keyboard would."""
+    monkeypatch.setattr(vflow_prompts, "stdin_is_tty", lambda: True)
+
+
 def test_ingest_records_the_media_date_range_of_both_kinds(tmp_path, monkeypatch):
     archive = _configure(tmp_path, monkeypatch)
     source = tmp_path / "CARD"
@@ -104,6 +110,7 @@ def test_one_overlapping_shoot_is_offered_and_merged_on_confirmation(
     tmp_path, monkeypatch
 ):
     archive = _configure(tmp_path, monkeypatch)
+    _at_a_terminal(monkeypatch)
     runner.invoke(app, ["ingest", "-s", str(_card(tmp_path, "A", [2])), "--auto"])
 
     result = runner.invoke(
@@ -126,6 +133,7 @@ def test_one_overlapping_shoot_is_offered_and_merged_on_confirmation(
 
 def test_declining_the_suggestion_creates_the_derived_shoot(tmp_path, monkeypatch):
     archive = _configure(tmp_path, monkeypatch)
+    _at_a_terminal(monkeypatch)
     runner.invoke(app, ["ingest", "-s", str(_card(tmp_path, "A", [2])), "--auto"])
 
     result = runner.invoke(
@@ -150,8 +158,14 @@ def test_merging_expands_the_recorded_range_without_renaming_the_folder(
 
     result = runner.invoke(
         app,
-        ["ingest", "-s", str(_card(tmp_path, "B", [2, 9])), "--auto"],
-        input="y\n",
+        [
+            "ingest",
+            "-s",
+            str(_card(tmp_path, "B", [2, 9])),
+            "--auto",
+            "--merge-into",
+            "2026-08-02_Ingest",
+        ],
     )
 
     assert result.exit_code == 0, result.output
@@ -221,6 +235,7 @@ def test_an_explicit_collection_name_never_prompts(tmp_path, monkeypatch):
 
 def test_an_overlapping_collection_is_offered_on_its_own(tmp_path, monkeypatch):
     archive = _configure(tmp_path, monkeypatch)
+    _at_a_terminal(monkeypatch)
     first = tmp_path / "FIRST"
     _frame(first, "DSC00811", 2)
     runner.invoke(app, ["ingest", "-s", str(first), "-n", "2026-08-02_Stills"])
@@ -238,6 +253,7 @@ def test_an_unmanifested_folder_matches_by_the_dates_in_its_name(
     tmp_path, monkeypatch
 ):
     archive = _configure(tmp_path, monkeypatch)
+    _at_a_terminal(monkeypatch)
     existing = _shoot(archive, "2026-08-01_to_2026-08-05_Stockholm")
     existing.mkdir(parents=True)
     (existing / "OLD.MP4").write_bytes(b"older-footage")
@@ -285,6 +301,7 @@ def test_index_records_the_range_of_the_folders_it_indexes(tmp_path, monkeypatch
 
 def test_an_indexed_folder_matches_by_its_recorded_range(tmp_path, monkeypatch):
     archive = _configure(tmp_path, monkeypatch)
+    _at_a_terminal(monkeypatch)
     existing = _shoot(archive, "Stockholm_Trip")
     existing.mkdir(parents=True)
     clip = existing / "OLD.MP4"

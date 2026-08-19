@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 from vflow import cleanup_service
 from vflow import config as vflow_config
 from vflow import main as vflow_main
+from vflow import prompts as vflow_prompts
 from vflow.main import app
 from vflow.resolve_adapter import ResolveUnavailableError
 
@@ -128,7 +129,7 @@ def test_cleanup_stops_for_unresolved_offline_media(tmp_path, monkeypatch):
     adapter = FakeResolveAdapter(unresolved=["offline/A001.MP4"])
     monkeypatch.setattr(vflow_main, "get_resolve_adapter", lambda: adapter)
 
-    result = runner.invoke(app, _args(), input="y\n")
+    result = runner.invoke(app, _args("--confirm"))
 
     assert result.exit_code == 1
     assert "Resolve validation gate failed" in result.output
@@ -142,7 +143,7 @@ def test_cleanup_relinks_then_deletes_after_confirmation(tmp_path, monkeypatch):
     adapter = FakeResolveAdapter(relinked=2)
     monkeypatch.setattr(vflow_main, "get_resolve_adapter", lambda: adapter)
 
-    result = runner.invoke(app, _args(), input="y\n")
+    result = runner.invoke(app, _args("--confirm"))
 
     assert result.exit_code == 0, result.output
     assert "Resolve media relinked: 2" in result.output
@@ -160,7 +161,7 @@ def test_cleanup_stops_when_resolve_is_unavailable(tmp_path, monkeypatch):
         raise ResolveUnavailableError("Resolve access failed: unavailable in test")
 
     monkeypatch.setattr(vflow_main, "get_resolve_adapter", unavailable)
-    result = runner.invoke(app, _args(), input="y\n")
+    result = runner.invoke(app, _args("--confirm"))
 
     assert result.exit_code == 1
     assert "Resolve access failed" in result.output
@@ -177,8 +178,7 @@ def test_skip_resolve_bypasses_only_that_gate(tmp_path, monkeypatch):
     monkeypatch.setattr(vflow_main, "get_resolve_adapter", unexpected_adapter)
     result = runner.invoke(
         app,
-        _args("--skip-resolve-validation"),
-        input="y\n",
+        _args("--skip-resolve-validation", "--confirm"),
     )
 
     assert result.exit_code == 0, result.output
@@ -192,6 +192,8 @@ def test_cleanup_declined_confirmation_retains_every_file(tmp_path, monkeypatch)
     locations = _configure(tmp_path, monkeypatch)
     _working_copy(tmp_path)
     monkeypatch.setattr(vflow_main, "get_resolve_adapter", lambda: FakeResolveAdapter())
+
+    monkeypatch.setattr(vflow_prompts, "stdin_is_tty", lambda: True)
 
     result = runner.invoke(app, _args(), input="n\n")
 
@@ -232,7 +234,7 @@ def test_cleanup_reports_partial_deletion_failure(tmp_path, monkeypatch):
         return original_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(cleanup_service.Path, "unlink", fail_second)
-    result = runner.invoke(app, _args(), input="y\n")
+    result = runner.invoke(app, _args("--confirm"))
 
     assert result.exit_code == 1
     assert "Working Copy files deleted: 1" in result.output

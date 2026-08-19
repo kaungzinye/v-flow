@@ -18,6 +18,7 @@ from .core.date_utils import (
 from .core.patterns import _extract_number_from_filename, _matches_pattern
 from .card_ingest import holds_footage, ingest_card
 from .collection_ingest import holds_photos, ingest_photos
+from .prompts import confirm as confirm_decision
 from .shoot_manifest import (
     Layout,
     PENDING_MANIFEST_NAME,
@@ -59,45 +60,150 @@ def overlapping_folders(
     return found
 
 
-def suggest_folder(
+# The word that scopes one merge answer to one media kind, for the card that raises a
+# suggestion for its footage and its photos at once.
+MERGE_SCOPES = {"shoot": "video", "collection": "photo"}
+MERGE_LABELS = {"video": "Shoot", "photo": "Collection"}
+
+
+class MergeDecision:
+    """The answers --merge-into and --no-merge carry into a run's date-overlap suggestions.
+
+    A bare `--merge-into <name>` answers whichever kind suggests; a card that suggests
+    for both kinds needs `shoot=<name>` or `collection=<name>`, so one answer never
+    silently lands photos in a Shoot's name or the reverse.
+    """
+
+    def __init__(self, merge_into: Optional[list[str]] = None, no_merge: bool = False) -> None:
+        self.decline = no_merge
+        self.scoped: dict[str, str] = {}
+        self.bare: Optional[str] = None
+        self.given: set[str] = set()
+        self.used: set[str] = set()
+        for value in merge_into or []:
+            scope, separator, name = value.partition("=")
+            if separator and scope in MERGE_SCOPES:
+                if not name:
+                    raise ValueError(f"--merge-into '{value}' names no {scope}.")
+                kind = MERGE_SCOPES[scope]
+                if kind in self.scoped:
+                    raise ValueError(f"--merge-into names a {scope} twice.")
+                self.scoped[kind] = name
+            elif self.bare is not None:
+                raise ValueError(
+                    "--merge-into answers one suggestion; scope each one as "
+                    "'shoot=<name>' or 'collection=<name>' to answer both."
+                )
+            else:
+                self.bare = value
+            self.given.add(value)
+        if self.bare is not None and self.scoped:
+            raise ValueError(
+                "Give --merge-into as one bare name or as scoped values, not both."
+            )
+
+    def answer(self, kind: str, candidate: str, contested: bool) -> Optional[bool]:
+        """The flagged answer for one kind's suggestion, or nothing when the flags are silent."""
+        name = self.scoped.get(kind)
+        given = None if name is None else f"{_scope_word(kind)}={name}"
+        if name is None and self.bare is not None:
+            if contested:
+                raise ValueError(
+                    f"A Shoot and a Collection both overlap these files, so "
+                    f"--merge-into '{self.bare}' is ambiguous. Pass "
+                    f"--merge-into 'shoot=<name>' and --merge-into 'collection=<name>'."
+                )
+            name = given = self.bare
+        if name is None:
+            return False if self.decline else None
+        self.used.add(given)
+        if name != candidate:
+            raise ValueError(
+                f"No {MERGE_LABELS[kind]} named '{name}' overlaps these files; "
+                f"'{candidate}' does."
+            )
+        return True
+
+    def unanswered(self) -> list[str]:
+        """The --merge-into values no suggestion in this run matched."""
+        return sorted(self.given - self.used)
+
+
+def _scope_word(kind: str) -> str:
+    return "shoot" if kind == "video" else "collection"
+
+
+def merge_candidates(
     archive: Path,
     kind: str,
-    label: str,
     span: DateRange,
     derived: str,
     layout: Optional[Layout] = None,
-) -> str:
-    """Offer one date-overlapping folder to merge into, falling back to the derived name.
-
-    One candidate is a question; several are ambiguous, so v-flow lists them and asks
-    nothing. Declining, like ambiguity, means the derived name.
-    """
-    candidates = [
+) -> list[tuple[str, DateRange]]:
+    """Existing folders of one kind that the incoming files could join instead."""
+    return [
         (name, recorded)
         for name, recorded in overlapping_folders(archive, kind, span, layout)
         if name != derived
     ]
-    if not candidates:
-        return derived
 
-    if len(candidates) > 1:
-        typer.echo(
-            f"These {label}s overlap {format_date_range(span)}, "
-            f"so v-flow chooses none of them:"
-        )
-        for name, recorded in candidates:
-            typer.echo(f"  {name} ({format_date_range(recorded)})")
-        typer.echo(f"Using {label} '{derived}'. Name one with the matching option to merge.")
-        return derived
 
-    name, recorded = candidates[0]
-    merge = typer.confirm(
-        f"{label} '{name}' ({format_date_range(recorded)}) overlaps these files "
-        f"({format_date_range(span)}). Add them to it "
-        f"instead of a new {label} '{derived}'?",
-        default=False,
+def _report_ambiguous(kind: str, candidates: list[tuple[str, DateRange]], derived: str, span: DateRange) -> None:
+    """List several overlapping folders and choose none of them."""
+    label = MERGE_LABELS[kind]
+    typer.echo(
+        f"These {label}s overlap {format_date_range(span)}, "
+        f"so v-flow chooses none of them:"
     )
-    return name if merge else derived
+    for name, recorded in candidates:
+        typer.echo(f"  {name} ({format_date_range(recorded)})")
+    typer.echo(f"Using {label} '{derived}'. Name one with the matching option to merge.")
+
+
+def resolve_merges(
+    plans: dict[str, dict], decision: MergeDecision, span: Optional[DateRange]
+) -> dict[str, str]:
+    """Settle every date-overlap suggestion this ingest raises, by flag or by asking.
+
+    One candidate is a question; several are ambiguous, so v-flow lists them and asks
+    nothing. Declining, like ambiguity, means the derived name.
+    """
+    chosen = {kind: plan["derived"] for kind, plan in plans.items()}
+    asked = {
+        kind: plan["candidates"][0]
+        for kind, plan in plans.items()
+        if len(plan["candidates"]) == 1
+    }
+    for kind, plan in plans.items():
+        if len(plan["candidates"]) > 1:
+            _report_ambiguous(kind, plan["candidates"], plan["derived"], span)
+
+    contested = len(asked) > 1
+    for kind, (name, recorded) in asked.items():
+        label = MERGE_LABELS[kind]
+        derived = plans[kind]["derived"]
+        question = (
+            f"{label} '{name}' ({format_date_range(recorded)}) overlaps these files "
+            f"({format_date_range(span)})."
+        )
+        answer = decision.answer(kind, name, contested)
+        if answer is None:
+            flag_value = f"{_scope_word(kind)}={name}" if contested else name
+            answer = confirm_decision(
+                f"{question} Add them to it instead of a new {label} '{derived}'?",
+                question,
+                f"--merge-into '{flag_value}' or --no-merge",
+            )
+        if answer:
+            chosen[kind] = name
+
+    unanswered = decision.unanswered()
+    if unanswered:
+        listed = ", ".join(f"'{value}'" for value in unanswered)
+        raise ValueError(
+            f"--merge-into {listed} names no folder that overlaps these files."
+        )
+    return chosen
 
 
 def ingest_report(
@@ -291,6 +397,8 @@ def ingest_media(
     import_batch_id: Optional[str] = None,
     include_all: bool = False,
     layout: Optional[Layout] = None,
+    merge_into: Optional[list[str]] = None,
+    no_merge: bool = False,
 ) -> None:
     """Copy one card's footage into a flat Shoot and its photos into a flat Collection."""
     source_path = Path(source_dir)
@@ -335,18 +443,33 @@ def ingest_media(
         typer.echo("No footage or photos found in the source directory.", err=True)
         raise typer.Exit(code=1)
 
-    # A name given on the command line is the decision, so only --auto asks.
-    if span is not None and footage:
-        target_shoot_name = suggest_folder(
-            archive_dest, "video", "Shoot", span, target_shoot_name, layout
-        )
-
     # The Collection carries the Shoot's name so one card lands under one identity.
     target_collection_name = collection_name or target_shoot_name
+
+    # A name given on the command line is the decision, so only --auto asks.
+    plans: dict[str, dict] = {}
+    if span is not None and footage:
+        plans["video"] = {
+            "derived": target_shoot_name,
+            "candidates": merge_candidates(
+                archive_dest, "video", span, target_shoot_name, layout
+            ),
+        }
     if span is not None and photos and not collection_name:
-        target_collection_name = suggest_folder(
-            archive_dest, "photo", "Collection", span, target_collection_name, layout
-        )
+        plans["photo"] = {
+            "derived": target_collection_name,
+            "candidates": merge_candidates(
+                archive_dest, "photo", span, target_collection_name, layout
+            ),
+        }
+    try:
+        decision = MergeDecision(merge_into, no_merge)
+        chosen = resolve_merges(plans, decision, span)
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    target_shoot_name = chosen.get("video", target_shoot_name)
+    target_collection_name = chosen.get("photo", target_collection_name)
 
     if footage:
         typer.echo(f"Archiving footage into Shoot '{target_shoot_name}'...")

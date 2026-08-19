@@ -30,3 +30,5 @@ Route by the outcome the user wants:
 Read the current branch's reference before acting. In a chained request, finish the current branch before reading the next branch's reference.
 
 Resolve exact paths and identities before changing storage. Dry-run every changing command and obtain approval where the selected reference requires it.
+
+Every decision v-flow needs has a flag that carries it. A command that reaches a decision it was not given stops, changes nothing, and names the flag. Relay that question to the user in plain words, then re-run the command with the flag their answer chooses; never guess it.

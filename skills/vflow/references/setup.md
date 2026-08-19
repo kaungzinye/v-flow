@@ -12,7 +12,7 @@ Explain the storage choices before asking for paths:
 
    Complete when each existing location has a path and availability result, or configuration is absent.
 
-2. If configuration is absent, run `v-flow make-config`. Ask for one location at a time, explain its purpose, and set the confirmed path:
+2. If configuration is absent, run `v-flow make-config`. It refuses to replace an existing file until the user asks for that, which `--overwrite` says. Ask for one location at a time, explain its purpose, and set the confirmed path:
 
    ```bash
    v-flow set archive <path>
