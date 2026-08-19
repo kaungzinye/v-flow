@@ -9,12 +9,16 @@ A creative editing effort that combines media from one or more Shoots and produc
 _Avoid_: Job folder, shoot project
 
 **Shoot**:
-Footage captured in a certain date range and stored as one named collection. A Shoot contains one or more Import Batches and is independent of the Projects that use it.
+Footage captured in a certain date range and stored as one named collection, held as one flat folder under `Video/RAW`. A Shoot receives one or more Import Batches and is independent of the Projects that use it.
 _Avoid_: Project, day folder
 
 **Import Batch**:
-The immutable contents received from one camera card or source folder during a single ingest.
-_Avoid_: Flattened import, loose clips
+The footage received from one camera card or source folder during a single ingest, recorded per file in the Shoot manifest.
+_Avoid_: Batch folder, card folder
+
+**Shoot Manifest**:
+The hidden `.vflow-manifest.json` inside a Shoot folder. It records the checksum algorithm and, per file, its name, byte size, checksum, card-relative path, Import Batch, and ingest time, plus the files excluded or deduplicated during ingest.
+_Avoid_: Sidecar, index
 
 **Camera Original**:
 Unmodified source media together with its companion metadata, audio, proxy, and sidecar files.
