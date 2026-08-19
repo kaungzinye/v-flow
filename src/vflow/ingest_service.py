@@ -6,26 +6,98 @@ from typing import Optional
 
 import typer
 
-from .core.date_utils import format_shoot_name
+from .core.date_utils import (
+    DateRange,
+    format_date_range,
+    format_shoot_name,
+    manifest_date_range,
+    media_datetime,
+    parse_shoot_date_range,
+    ranges_overlap,
+)
 from .core.patterns import _extract_number_from_filename, _matches_pattern
 from .card_ingest import holds_footage, ingest_card
 from .collection_ingest import holds_photos, ingest_photos
-from .shoot_manifest import Layout, PHOTO_EXTENSIONS, raw_root
+from .shoot_manifest import (
+    Layout,
+    PENDING_MANIFEST_NAME,
+    MANIFEST_NAME,
+    PHOTO_EXTENSIONS,
+    iter_raw_folders,
+    raw_root,
+    read_manifest,
+)
 
 
 def _get_media_date(file_path: Path) -> datetime:
+    """The capture date/time of one media file."""
+    return media_datetime(file_path)
+
+
+def _folder_range(directory: Path) -> Optional[DateRange]:
+    """The date range a folder answers for: its manifest's, else the one its name states.
+
+    A manifested folder speaks only through its manifest, so a folder indexed before
+    v-flow recorded ranges stays unmatched until `v-flow index` runs again.
     """
-    Extract the date/time from a media file.
-    Uses filesystem creation date (birthtime) if available, else modification time.
+    for name in (PENDING_MANIFEST_NAME, MANIFEST_NAME):
+        manifest = read_manifest(directory / name)
+        if manifest is not None:
+            return manifest_date_range(manifest)
+    return parse_shoot_date_range(directory.name)
+
+
+def overlapping_folders(
+    archive: Path, kind: str, span: DateRange, layout: Optional[Layout] = None
+) -> list[tuple[str, DateRange]]:
+    """Existing folders of one media kind whose date range meets the incoming files."""
+    found = []
+    for directory in iter_raw_folders(archive, kind, layout):
+        recorded = _folder_range(directory)
+        if recorded is not None and ranges_overlap(recorded, span):
+            found.append((directory.name, recorded))
+    return found
+
+
+def suggest_folder(
+    archive: Path,
+    kind: str,
+    label: str,
+    span: DateRange,
+    derived: str,
+    layout: Optional[Layout] = None,
+) -> str:
+    """Offer one date-overlapping folder to merge into, falling back to the derived name.
+
+    One candidate is a question; several are ambiguous, so v-flow lists them and asks
+    nothing. Declining, like ambiguity, means the derived name.
     """
-    try:
-        stat = file_path.stat()
-        creation_time = getattr(stat, "st_birthtime", None)
-        if creation_time:
-            return datetime.fromtimestamp(creation_time)
-        return datetime.fromtimestamp(stat.st_mtime)
-    except Exception:
-        return datetime.now()
+    candidates = [
+        (name, recorded)
+        for name, recorded in overlapping_folders(archive, kind, span, layout)
+        if name != derived
+    ]
+    if not candidates:
+        return derived
+
+    if len(candidates) > 1:
+        typer.echo(
+            f"These {label}s overlap {format_date_range(span)}, "
+            f"so v-flow chooses none of them:"
+        )
+        for name, recorded in candidates:
+            typer.echo(f"  {name} ({format_date_range(recorded)})")
+        typer.echo(f"Using {label} '{derived}'. Name one with the matching option to merge.")
+        return derived
+
+    name, recorded = candidates[0]
+    merge = typer.confirm(
+        f"{label} '{name}' ({format_date_range(recorded)}) overlaps these files "
+        f"({format_date_range(span)}). Add them to it "
+        f"instead of a new {label} '{derived}'?",
+        default=False,
+    )
+    return name if merge else derived
 
 
 def ingest_report(
@@ -247,24 +319,34 @@ def ingest_media(
         typer.echo("No files found in the source directory.", err=True)
         raise typer.Exit(code=1)
 
+    span: Optional[DateRange] = None
     target_shoot_name = shoot_name
     if auto:
         dates = [_get_media_date(path) for path in files_for_identity]
-        target_shoot_name = format_shoot_name(
-            min(dates).date(), max(dates).date(), "Ingest"
-        )
+        span = (min(dates).date(), max(dates).date())
+        target_shoot_name = format_shoot_name(span[0], span[1], "Ingest")
     if not target_shoot_name:
         typer.echo("Shoot name is required when --auto is not used.", err=True)
         raise typer.Exit(code=1)
-
-    # The Collection carries the Shoot's name so one card lands under one identity.
-    target_collection_name = collection_name or target_shoot_name
 
     footage = holds_footage(source_path, files_for_identity)
     photos = holds_photos(source_path, files_for_identity)
     if not footage and not photos:
         typer.echo("No footage or photos found in the source directory.", err=True)
         raise typer.Exit(code=1)
+
+    # A name given on the command line is the decision, so only --auto asks.
+    if span is not None and footage:
+        target_shoot_name = suggest_folder(
+            archive_dest, "video", "Shoot", span, target_shoot_name, layout
+        )
+
+    # The Collection carries the Shoot's name so one card lands under one identity.
+    target_collection_name = collection_name or target_shoot_name
+    if span is not None and photos and not collection_name:
+        target_collection_name = suggest_folder(
+            archive_dest, "photo", "Collection", span, target_collection_name, layout
+        )
 
     if footage:
         typer.echo(f"Archiving footage into Shoot '{target_shoot_name}'...")

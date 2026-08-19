@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from .core.date_utils import media_date, record_media_dates
 from .shoot_manifest import (
     Layout,
     MANIFEST_NAME,
@@ -102,12 +103,19 @@ class _Collection:
         self.manifest = manifest
         self.path = path
         self.taken = {entry["name"]: entry["checksum"] for entry in manifest["files"]}
+        # Capture dates of the card files landing here, read from the card because a
+        # copy carries the ingest moment as its birthtime.
+        self.dates: list = []
 
     def add(self, record: dict) -> None:
         self.manifest["files"].append(record)
         self.taken[record["name"]] = record["checksum"]
 
+    def note(self, source_file: Path) -> None:
+        self.dates.append(media_date(source_file))
+
     def save(self) -> None:
+        record_media_dates(self.manifest, self.dates)
         write_json_atomically(self.path, self.manifest)
 
 
@@ -265,6 +273,7 @@ def ingest_photos(
             archived = collection_path / relative_path(entry["name"])
             if archived.is_file() and checksum(archived) == entry["checksum"]:
                 stored = entry["name"]
+                primary.note(source_file)
                 counts["verified"] += 1
             else:
                 manifest["files"].remove(entry)
@@ -322,6 +331,7 @@ def ingest_photos(
             if name != relative.name:
                 record["original_name"] = relative.name
             primary.add(record)
+            primary.note(source_file)
             index.setdefault(byte_size, {}).setdefault(
                 stored_checksum, (collection_path / name).relative_to(archive).as_posix()
             )

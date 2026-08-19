@@ -5,10 +5,12 @@ from typing import Iterable, Optional
 
 import typer
 
+from .core.date_utils import manifest_date_range, media_date, record_media_dates
 from .shoot_manifest import (
     Layout,
     add_indexed_entry,
     covered_names,
+    folder_files,
     indexed_entry,
     is_partial,
     iter_raw_folders,
@@ -87,6 +89,18 @@ def summarize(plan: dict, hashed: int, manifest_path: Path) -> dict:
     }
 
 
+def record_folder_dates(plan: dict) -> None:
+    """Record the capture-date span of one folder's contents in its manifest."""
+    directory = plan["directory"]
+    manifest = plan["manifest"]
+    before = manifest_date_range(manifest)
+    span = record_media_dates(
+        manifest, (media_date(directory / name) for name, _ in folder_files(directory))
+    )
+    if span is not None and span != before:
+        write_json_atomically(manifest_source(directory), manifest)
+
+
 def index_folder(plan: dict) -> dict:
     """Hash every uncovered file in one folder, saving progress after each one."""
     directory = plan["directory"]
@@ -143,6 +157,8 @@ def index_archive(
             summarize(plan, 0, manifest_source(plan["directory"])) for plan in work
         ]
         return result
+    for plan in plans:
+        record_folder_dates(plan)
     result["folders"] = [index_folder(plan) for plan in work]
     return result
 

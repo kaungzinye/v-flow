@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from .core.date_utils import media_date, record_media_dates
 from .shoot_manifest import (
     EXTRAS_DIRECTORY,
     FOOTAGE_EXTENSIONS,
@@ -96,8 +97,12 @@ def ingest_card(
     verified = 0
     deduplicated = 0
     excluded = 0
+    # Capture dates of the card files that land in this Shoot, read from the card
+    # because a copy carries the ingest moment as its birthtime.
+    landed: list = []
 
     def save_progress() -> None:
+        record_media_dates(manifest, landed)
         write_json_atomically(pending_path, manifest)
 
     for relative, source_file in candidates:
@@ -138,6 +143,7 @@ def ingest_card(
         if entry is not None:
             archived = shoot_path / relative_path(entry["name"])
             if archived.is_file() and checksum(archived) == entry["checksum"]:
+                landed.append(media_date(source_file))
                 verified += 1
                 continue
             manifest["files"].remove(entry)
@@ -194,6 +200,7 @@ def ingest_card(
         if name != relative.name:
             record["original_name"] = relative.name
         manifest["files"].append(record)
+        landed.append(media_date(source_file))
         taken[name] = stored_checksum
         index.setdefault(byte_size, {}).setdefault(
             stored_checksum, (shoot_path / name).relative_to(archive).as_posix()
@@ -201,7 +208,7 @@ def ingest_card(
         copied += 1
         save_progress()
 
-    write_json_atomically(pending_path, manifest)
+    save_progress()
     os.replace(pending_path, manifest_path)
 
     return {
