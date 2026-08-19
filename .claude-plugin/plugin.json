@@ -1,6 +1,6 @@
 {
   "name": "v-flow",
-  "description": "Copies camera cards into a protected long-term archive, keeps editing copies organized, and deletes nothing until the original copy is proven safe. Works with DaVinci Resolve.",
+  "description": "Automates uploading your camera cards onto archive and editing drives, organized into date-named shoots. Never deletes the last safe copy. Works with DaVinci Resolve.",
   "version": "0.2.0",
   "author": {
     "name": "Kaung",
