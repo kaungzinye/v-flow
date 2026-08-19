@@ -48,6 +48,15 @@ def _exclusion_reason(relative: Path, attached: bool) -> Optional[str]:
     return None
 
 
+def holds_photos(source: Path, files: list[Path]) -> bool:
+    """Whether any of a source's files belongs in a Collection. Sidecars ride photos, so they never count alone."""
+    return any(
+        path.suffix.lower() in PHOTO_EXTENSIONS
+        and _hidden_reason(path.relative_to(source)) is None
+        for path in files
+    )
+
+
 def _attach_sidecars(candidates: list[tuple[Path, Path]]) -> dict[Path, tuple[Path, str]]:
     """Map each editing sidecar to the photo it belongs to, matched inside one card folder."""
     by_name: dict[tuple[Path, str], Path] = {}

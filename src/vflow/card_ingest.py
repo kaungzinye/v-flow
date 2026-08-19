@@ -38,6 +38,11 @@ def _exclusion_reason(relative: Path) -> Optional[str]:
     return None
 
 
+def holds_footage(source: Path, files: list[Path]) -> bool:
+    """Whether any of a source's files belongs in a Shoot."""
+    return any(_exclusion_reason(path.relative_to(source)) is None for path in files)
+
+
 def ingest_card(
     source: Path,
     archive: Path,

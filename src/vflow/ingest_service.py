@@ -11,10 +11,8 @@ from .core.date_utils import (
     format_shoot_name,
 )
 from .core.patterns import _extract_number_from_filename, _matches_pattern
-from .card_ingest import ingest_card
-from .card_ingest import _exclusion_reason as _footage_exclusion_reason
-from .collection_ingest import _hidden_reason
-from .collection_ingest import ingest_photos
+from .card_ingest import holds_footage, ingest_card
+from .collection_ingest import holds_photos, ingest_photos
 from .shoot_manifest import PHOTO_EXTENSIONS
 
 
@@ -247,20 +245,6 @@ def ingest_report(
     typer.echo("")
 
 
-def _carries_footage(source: Path, files: list[Path]) -> bool:
-    return any(
-        _footage_exclusion_reason(path.relative_to(source)) is None for path in files
-    )
-
-
-def _carries_photos(source: Path, files: list[Path]) -> bool:
-    return any(
-        path.suffix.lower() in PHOTO_EXTENSIONS
-        and _hidden_reason(path.relative_to(source)) is None
-        for path in files
-    )
-
-
 def _abort(error: Exception) -> typer.Exit:
     typer.echo(f"Ingest failed: {error}", err=True)
     typer.echo(
@@ -330,8 +314,8 @@ def ingest_media(
     # The Collection carries the Shoot's name so one card lands under one identity.
     target_collection_name = collection_name or target_shoot_name
 
-    footage = _carries_footage(source_path, files_for_identity)
-    photos = _carries_photos(source_path, files_for_identity)
+    footage = holds_footage(source_path, files_for_identity)
+    photos = holds_photos(source_path, files_for_identity)
     if not footage and not photos:
         typer.echo("No footage or photos found in the source directory.", err=True)
         raise typer.Exit(code=1)
