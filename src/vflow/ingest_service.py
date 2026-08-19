@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -11,9 +10,10 @@ from .core.date_utils import (
     parse_shoot_date_range,
     format_shoot_name,
 )
-from .core.fs_ops import copy_and_verify
 from .core.patterns import _extract_number_from_filename, _matches_pattern
 from .card_ingest import ingest_card
+from .collection_ingest import ingest_photos
+from .shoot_manifest import PHOTO_EXTENSIONS
 
 
 def _get_media_date(file_path: Path) -> datetime:
@@ -321,84 +321,58 @@ def ingest_shoot(
 
 def photo_ingest(
     source_dir: str,
-    shoot_name: str,
+    collection_name: str,
     archive_path: Path,
+    files_filter: Optional[list[str]] = None,
+    import_batch_id: Optional[str] = None,
 ) -> None:
-    """
-    Copies new RAW photo files from source_dir to archive_path/Photo/RAW/<shoot_name>.
-    Skips files that already exist in that specific shoot folder by name+size.
-    Preserves timestamps using shutil.copy2.
-    """
+    """Copy RAW photos and their editing sidecars into a flat, checksum-verified Collection."""
     source_path = Path(source_dir)
     if not source_path.exists() or not source_path.is_dir():
         typer.echo(f"Source directory not found: {source_path}", err=True)
         raise typer.Exit(code=1)
 
-    photo_extensions = {".arw", ".cr2", ".cr3", ".nef", ".dng", ".orf", ".rw2"}
+    selected_files: Optional[list[Path]] = None
+    if files_filter:
+        all_source_files = [path for path in source_path.rglob("*") if path.is_file()]
+        selected_files = []
+        for pattern in files_filter:
+            selected_files.extend(
+                path for path in all_source_files if _matches_pattern(pattern, path.name)
+            )
+        selected_files = list(dict.fromkeys(selected_files))
+        if not selected_files:
+            typer.echo(
+                f"No files found matching filter: {', '.join(files_filter)}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
 
-    all_files: list[Path] = []
-    for file_path in source_path.rglob("*"):
-        if file_path.is_file() and file_path.suffix.lower() in photo_extensions:
-            all_files.append(file_path)
-
-    if not all_files:
-        typer.echo("No RAW photo files found in source directory.", err=True)
-        return
-
-    shoot_dir = archive_path / "Photo" / "RAW" / shoot_name
+    typer.echo(f"Archiving photos into Collection '{collection_name}'...")
     try:
-        shoot_dir.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        typer.echo(f"Could not create shoot directory: {e}", err=True)
+        result = ingest_photos(
+            source=source_path,
+            archive=archive_path,
+            collection=collection_name,
+            batch_id=import_batch_id,
+            selected_files=selected_files,
+        )
+    except (OSError, ValueError) as error:
+        typer.echo(f"Photo ingest failed: {error}", err=True)
+        typer.echo(
+            "Verified Archive files remain intact; retry the same ingest to resume.",
+            err=True,
+        )
         raise typer.Exit(code=1)
-
-    # Build index of files already in this specific shoot folder only (not archive-wide)
-    shoot_index: set[tuple[str, int]] = set()
-    for f in shoot_dir.iterdir():
-        if f.is_file() and f.suffix.lower() in photo_extensions:
-            try:
-                shoot_index.add((f.name, f.stat().st_size))
-            except (OSError, FileNotFoundError):
-                pass
-
-    typer.echo(f"\nSource: {source_path}")
-    typer.echo(f"Destination: {shoot_dir}")
-    typer.echo(f"Found: {len(all_files)} RAW file(s) on card")
-    typer.echo(f"Already in shoot folder: {len(shoot_index)} file(s)")
-
-    copied_count = 0
-    skipped_count = 0
-    error_count = 0
-
-    with typer.progressbar(all_files, label=f"Photo ingest {shoot_name}") as progress:
-        for file_path in progress:
-            try:
-                size = file_path.stat().st_size
-            except (OSError, FileNotFoundError):
-                error_count += 1
-                continue
-
-            key = (file_path.name, size)
-            if key in shoot_index:
-                skipped_count += 1
-                continue
-
-            dest_file = shoot_dir / file_path.name
-            try:
-                shutil.copy2(str(file_path), str(dest_file))
-                shoot_index.add(key)
-                copied_count += 1
-            except Exception as e:
-                typer.echo(f"\n[ERROR] Could not copy {file_path.name}: {e}", err=True)
-                error_count += 1
-
-    typer.echo(f"\n{'=' * 70}")
-    typer.echo("PHOTO INGEST COMPLETE")
-    typer.echo(f"{'=' * 70}")
-    typer.echo(f"Copied:  {copied_count}")
-    typer.echo(f"Skipped: {skipped_count} (already exist in shoot folder)")
-    typer.echo(f"Errors:  {error_count}")
-    typer.echo(f"{'=' * 70}\n")
+    typer.echo(f"Collection folder: {result['collection_directory']}")
+    typer.echo(
+        f"Import Batch '{result['batch_id']}': "
+        f"{result['copied']} copied, {result['verified']} already verified, "
+        f"{result['deduplicated']} deduplicated, {result['excluded']} excluded, "
+        f"{result['files']} in Collection."
+    )
+    typer.echo(f"Manifest: {result['manifest_path']}")
+    typer.echo("Retained copies: 1 (Archive only). The source remains untouched.")
 
 
 def card_report(
@@ -419,7 +393,7 @@ def card_report(
     photo_folder = source_path / "DCIM" / "100MSDCF"
 
     video_extensions = {".mp4", ".mov", ".mxf", ".mts", ".avi", ".m4v", ".braw", ".r3d", ".crm"}
-    photo_extensions = {".arw", ".cr2", ".cr3", ".nef", ".dng", ".orf", ".rw2"}
+    photo_extensions = PHOTO_EXTENSIONS
 
     typer.echo("\n" + "=" * 70)
     typer.echo("CARD REPORT")
