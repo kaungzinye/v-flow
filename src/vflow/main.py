@@ -7,6 +7,7 @@ from .checkout_service import checkout_shoot, report_checkout
 from .cleanup_service import delete_working_copy, prepare_cleanup, report_cleanup
 from .export_archive import archive_export, report_archive
 from .finish_service import finish_project, report_finish
+from .index_service import index_archive, report_index
 from .resolve_adapter import ResolveUnavailableError, get_resolve_adapter
 from .restore_service import report_restore, restore_archive_asset
 
@@ -49,6 +50,50 @@ def ingest(
         import_batch_id=import_batch,
         include_all=include_all,
     )
+
+
+@app.command()
+def index(
+    folder: list[str] = typer.Option(
+        None,
+        "--folder",
+        "-f",
+        help="Shoot or Collection to index, by folder name or Archive-relative path "
+        "such as 'Photo/RAW/2019 Trip'. Repeatable.",
+    ),
+    all_folders: bool = typer.Option(
+        False,
+        "--all",
+        help="Index every Shoot and Collection that lacks a complete Shoot Manifest.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report the folder count and total bytes to read without hashing anything.",
+    ),
+):
+    """Give existing folders a complete Shoot Manifest by hashing them in place.
+
+    Indexing walks flat folders under Video/RAW and Photo/RAW, hashes every file a
+    manifest does not cover yet, and writes the checksums into the folder's hidden
+    Shoot Manifest. It is purely additive: nothing moves, nothing is renamed, and the
+    folder's visible contents stay byte-for-byte identical. A Partial Shoot Manifest
+    left by ingest is completed rather than recomputed, and an interrupted run resumes
+    where it stopped. Indexing runs only when you ask for it; v-flow never schedules it.
+    """
+    app_config = config.load_config()
+    archive_path = config.get_location(app_config, "archive")
+    try:
+        result = index_archive(
+            archive_path,
+            names=folder or [],
+            all_folders=all_folders,
+            dry_run=dry_run,
+        )
+    except (OSError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    report_index(result)
 
 
 @app.command()
