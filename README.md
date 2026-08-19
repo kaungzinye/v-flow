@@ -14,7 +14,7 @@ You can drive it from the terminal, or just talk to Claude Code, Codex, or Curso
 curl -fsSL https://raw.githubusercontent.com/kaungzinye/v-flow/main/install_vflow.sh | bash
 ```
 
-That installs the `v-flow` command plus the agent skill. Claude Code users can grab the skill from the plugin marketplace instead:
+That installs the `v-flow` command plus the agent skill. Claude Code and Cowork users can grab the plugin instead, and the skill installs the CLI from PyPI on first use:
 
 ```
 /plugin marketplace add kaungzinye/v-flow

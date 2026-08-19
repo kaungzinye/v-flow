@@ -15,6 +15,8 @@ These terms control choices across branches:
 - **Collection** — the photos from one Shoot's card, stored as one named flat folder. One ingest names the Collection after the Shoot unless the user names it separately.
 - **Project** — a DaVinci Resolve editing effort that may use footage from several Shoots.
 
+If `v-flow` is not on PATH, install it before routing: `uv tool install vflow-cli`, or `pipx install vflow-cli` when uv is absent. Both give an isolated install; confirm with `v-flow --help`.
+
 Route by the outcome the user wants:
 
 - Set up drives or change where media lives: [references/setup.md](references/setup.md)
