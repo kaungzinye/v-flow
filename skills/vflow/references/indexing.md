@@ -21,7 +21,7 @@ Ingest already handles look-alike candidates in unindexed folders on its own, on
    v-flow index --folder <name>
    ```
 
-   An interrupted run resumes where it stopped. A **Partial Shoot Manifest** — progress left by ingest's targeted hashing or an interrupted index — is completed without re-reading its verified files.
+   Indexing prints a plain progress line every few seconds giving files and bytes hashed of the total and the file in hand. An interrupted run is safe: re-run the exact same command, and it states how many files are already hashed and reads only the rest. A **Partial Shoot Manifest** — progress left by ingest's targeted hashing or an interrupted index — is completed without re-reading its verified files.
 
    Complete when the CLI reports each folder's manifest as complete.
 

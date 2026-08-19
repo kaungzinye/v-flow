@@ -178,12 +178,12 @@ def test_an_interrupted_index_resumes_without_rehashing(tmp_path, monkeypatch):
     original_entry = index_service.indexed_entry
     attempts = 0
 
-    def fail_on_the_second_file(path):
+    def fail_on_the_second_file(path, on_bytes=None):
         nonlocal attempts
         attempts += 1
         if attempts == 2:
             raise OSError("simulated interruption")
-        return original_entry(path)
+        return original_entry(path, on_bytes)
 
     monkeypatch.setattr(index_service, "indexed_entry", fail_on_the_second_file)
     interrupted = runner.invoke(app, ["index", "--all"])

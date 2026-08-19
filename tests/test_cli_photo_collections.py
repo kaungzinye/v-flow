@@ -235,8 +235,8 @@ def test_photo_destination_is_verified_by_rehashing_the_archive_copy(tmp_path, m
     _write(source / "DSC00001.ARW", b"first-frame")
     original_copy = shoot_manifest.copy_hashing
 
-    def copy_then_corrupt(source_file, temporary):
-        digest = original_copy(source_file, temporary)
+    def copy_then_corrupt(source_file, temporary, on_bytes=None):
+        digest = original_copy(source_file, temporary, on_bytes)
         temporary.write_bytes(b"corrupted-on-arrival")
         return digest
 

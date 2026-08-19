@@ -3,8 +3,10 @@ import yaml
 from pathlib import Path
 from typing import Optional
 from . import config
+from . import prompts
 from .checkout_service import checkout_shoot, report_checkout
 from .cleanup_service import delete_working_copy, prepare_cleanup, report_cleanup
+from .doctor_service import diagnose, report_doctor
 from .export_archive import archive_export, report_archive
 from .finish_service import finish_project, report_finish
 from .index_service import index_archive, report_index
@@ -25,6 +27,17 @@ def ingest(
     auto: bool = typer.Option(False, "--auto", "-a", help="Automatically infer the Shoot and Collection name from file dates. Creates date range if spanning multiple days."),
     files: list[str] = typer.Option(None, "--files", help="Optional: Specific filenames, patterns, or ranges to ingest (e.g., 'C3317' or 'DSC00811-DSC00842'). Can specify multiple times. If omitted, ingests all files."),
     include_all: bool = typer.Option(False, "--include-all", help="Also preserve non-footage card files inside a hidden folder in the Shoot."),
+    merge_into: list[str] = typer.Option(
+        None,
+        "--merge-into",
+        help="Answer a date-overlap suggestion under --auto: the folder name to add the "
+        "files to, or 'shoot=<name>' / 'collection=<name>' when one card suggests both.",
+    ),
+    no_merge: bool = typer.Option(
+        False,
+        "--no-merge",
+        help="Decline every date-overlap suggestion and use the derived name.",
+    ),
 ):
     """
     Copies one card's footage into a flat Shoot and its photos into a flat Collection.
@@ -34,6 +47,10 @@ def ingest(
     unless --collection names it. A card without footage creates no Shoot, and
     a card without photos creates no Collection. Editing sidecars (.pp3, .xmp) ride beside
     the photo they belong to, including when --files selects the photo.
+
+    Under --auto, a date range that overlaps one existing folder is a question:
+    --merge-into names the folder to add the files to and --no-merge keeps the derived
+    name.
 
     Each folder carries a hidden SHA-256 manifest recording every archived file, its card
     path, exclusions, and deduplicated originals. A skip needs checksum identity, so recycled
@@ -60,6 +77,8 @@ def ingest(
         import_batch_id=import_batch,
         include_all=include_all,
         layout=config.get_layout(app_config),
+        merge_into=list(merge_into or []),
+        no_merge=no_merge,
     )
 
 
@@ -403,6 +422,11 @@ def cleanup(
         "--skip-resolve",
         help="Explicitly bypass only the Resolve validation gate.",
     ),
+    confirm: bool = typer.Option(
+        False,
+        "--confirm",
+        help="Answer the deletion confirmation gate, which every other gate still precedes.",
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -431,8 +455,11 @@ def cleanup(
         report_cleanup(plan)
         if dry_run:
             return
-        if not typer.confirm(
-            f"Delete {len(plan['files'])} verified files from this Working Copy?"
+        if not confirm and not prompts.confirm(
+            f"Delete {len(plan['files'])} verified files from this Working Copy?",
+            f"Cleanup deletes {len(plan['files'])} verified file(s) from the Working "
+            f"Copy at {plan['target']}.",
+            "--confirm",
         ):
             typer.echo("Confirmation gate declined; no files were deleted.", err=True)
             raise typer.Exit(code=1)
@@ -597,6 +624,22 @@ def copy_meta(
 
 
 @app.command()
+def doctor():
+    """Check the whole environment and say what works and what to fix.
+
+    Doctor reads configuration, storage, and the Resolve connection, writes nothing,
+    and asks nothing. It exits 0 when everything an ingest needs passes, and 1 when a
+    line marked [fail] names something to fix first. Informational lines describe what
+    a later command will need, and an unplugged drive is reported as unavailable rather
+    than worked around.
+    """
+    result = diagnose()
+    report_doctor(result)
+    if not result["ready"]:
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def locations():
     """Show storage roles and whether each configured location is available."""
     app_config = config.load_config()
@@ -685,14 +728,23 @@ def set_config(
 
 
 @app.command()
-def make_config():
+def make_config(
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Replace an existing configuration file with the sample.",
+    ),
+):
     """
     Creates a sample configuration file in your home directory.
     """
-    if config.CONFIG_PATH.exists():
+    if config.CONFIG_PATH.exists() and not overwrite:
         typer.echo(f"Configuration file already exists at: {config.CONFIG_PATH}")
-        overwrite = typer.confirm("Overwrite?")
-        if not overwrite:
+        if not prompts.confirm(
+            "Overwrite?",
+            f"A configuration file already exists at {config.CONFIG_PATH}.",
+            "--overwrite",
+        ):
             typer.echo("Aborting.")
             raise typer.Exit()
 

@@ -20,8 +20,10 @@ A Shoot is footage captured in a certain date range, held as one flat folder at 
 
    ```bash
    v-flow ingest --source <source> --shoot <shoot> [--collection <collection>] [--files <pattern>] [--include-all]
-   v-flow ingest --source <source> --auto [--include-all]
+   v-flow ingest --source <source> --auto [--include-all] [--merge-into <name> | --no-merge]
    ```
+
+   A card takes as long as it takes. The CLI prints a plain progress line every few seconds giving files and bytes done of the total and the file in hand, so a quiet stretch is work, not a hang. An interrupted ingest is safe: re-run the exact same command, and it resumes from the manifest, states how many files are already verified, and copies only the rest.
 
    Complete when the CLI reports each folder it wrote and its counts, or names the safety check that failed.
 
@@ -34,7 +36,7 @@ A Shoot is footage captured in a certain date range, held as one flat folder at 
 - Re-running the same ingest resumes from the manifests: files already archived and verified are not read from the card again.
 - A clip whose content is already archived anywhere under the footage root, or a photo whose content is already archived anywhere under the photo root, is skipped and recorded as deduplicated with a pointer to the existing file. Matching name and size alone never justifies a skip.
 - A file that shares a name with different existing content lands with a suffix, such as `C6634_b.MP4`, and the manifest keeps its original name. A deduplicated photo's sidecars follow it to the copy it matched.
-- Each manifest records the capture-date span of its folder's contents, and `v-flow index` records it for folders ingested elsewhere. Under `--auto`, when the card's dates overlap exactly one existing Shoot or Collection, v-flow names it and asks whether to add the card to it; answering no uses the derived date name. Several overlapping folders are listed and none is chosen. A folder with no manifest matches only through a date range in its name, so an event-named folder never matches. Merging expands the recorded span and never renames the folder. A name given with `--shoot` or `--collection` is the decision, so it never prompts.
+- Each manifest records the capture-date span of its folder's contents, and `v-flow index` records it for folders ingested elsewhere. Under `--auto`, when the card's dates overlap exactly one existing Shoot or Collection, v-flow names it and stops so the user can answer. Relay the folder it named, then re-run with `--merge-into <name>` to add the card to it or `--no-merge` to use the derived date name. When one card overlaps a Shoot and a Collection at once, scope each answer as `--merge-into shoot=<name>` or `--merge-into collection=<name>`; one bare name for two suggestions is refused rather than guessed. Several overlapping folders are listed and none is chosen. A folder with no manifest matches only through a date range in its name, so an event-named folder never matches. Merging expands the recorded span and never renames the folder. A name given with `--shoot` or `--collection` is the decision, so it raises no question.
 
 ## Safety gates
 

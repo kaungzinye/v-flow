@@ -8,11 +8,17 @@ Explain the storage choices before asking for paths:
 
 ## Configure
 
-1. Run `v-flow locations` to inspect what is already configured.
+1. Run `v-flow doctor` first, in this branch and whenever any v-flow command behaves unexpectedly.
+
+   It reads configuration, every storage role, the Archive layout roots, the Resolve connection, and the installed version, changes nothing, and prints one line per check. A line marked `[fail]` names the exact next action; `[info]` lines describe what a later command will need. Relay the failing lines to the user in their own words.
+
+   Complete when every `[fail]` line is either fixed or understood, or the output says the config file is absent.
+
+2. Run `v-flow locations` to inspect what is already configured.
 
    Complete when each existing location has a path and availability result, or configuration is absent.
 
-2. If configuration is absent, run `v-flow make-config`. Ask for one location at a time, explain its purpose, and set the confirmed path:
+3. If configuration is absent, run `v-flow make-config`. It refuses to replace an existing file until the user asks for that, which `--overwrite` says. Ask for one location at a time, explain its purpose, and set the confirmed path:
 
    ```bash
    v-flow set archive <path>
@@ -30,9 +36,9 @@ Explain the storage choices before asking for paths:
    v-flow set layout.photo_raw <subpath>     # default Photo/RAW
    ```
 
-3. Run `v-flow locations` again.
+4. Run `v-flow doctor` again.
 
-   Complete when the CLI accepts the configuration, its reported Archive layout is the one the user wants, and unavailable drives are clearly identified without changing their saved paths.
+   Complete when it exits 0, its reported Archive layout is the one the user wants, and unavailable drives are clearly identified without changing their saved paths.
 
 ## Refresh the installed skill
 
