@@ -7,6 +7,7 @@ import typer
 
 from .core.fs_ops import copy_and_verify, _format_bytes
 from .core.patterns import _matches_pattern
+from .shoot_manifest import PHOTO_EXTENSIONS
 
 
 def consolidate_files(
@@ -526,7 +527,7 @@ def card_verify(
     photo_folder = source_path / "DCIM" / "100MSDCF"
 
     video_extensions = {".mp4", ".mov", ".mxf", ".mts", ".avi", ".m4v", ".braw", ".r3d", ".crm"}
-    photo_extensions = {".arw", ".cr2", ".cr3", ".nef", ".dng", ".orf", ".rw2"}
+    photo_extensions = PHOTO_EXTENSIONS
 
     has_videos = video_folder.exists() and video_folder.is_dir()
     has_photos = photo_folder.exists() and photo_folder.is_dir()
