@@ -34,7 +34,7 @@ class FakeResolveAdapter:
 def _configure(tmp_path: Path, monkeypatch, unsafe_working=False) -> dict[str, Path]:
     archive = tmp_path / "archive"
     exports = tmp_path / "exports"
-    working = archive / "Camera Originals" if unsafe_working else tmp_path / "working"
+    working = archive / "Video" / "RAW" if unsafe_working else tmp_path / "working"
     for path in (archive, exports, working):
         path.mkdir(parents=True, exist_ok=True)
     config_path = tmp_path / "config.yml"
@@ -62,7 +62,7 @@ def _write(path: Path, content: bytes) -> None:
 def _working_copy(tmp_path: Path) -> None:
     source = tmp_path / "card"
     _write(source / "CLIP" / "A001.MP4", b"camera-original")
-    _write(source / "CLIP" / "A001.XML", b"sidecar")
+    _write(source / "CLIP" / "A002.MP4", b"camera-original-two")
     ingest = runner.invoke(
         app,
         ["ingest", "-s", str(source), "-n", "Shoot", "--import-batch", "card"],
@@ -103,13 +103,13 @@ def test_cleanup_refuses_a_target_inside_archive_storage(tmp_path, monkeypatch):
 
     assert result.exit_code == 1
     assert "Archive safety gate failed" in result.output
-    assert (locations["archive"] / "Camera Originals" / "Shoot").exists()
+    assert (locations["archive"] / "Video" / "RAW" / "Shoot").exists()
 
 
 def test_cleanup_stops_when_an_archive_checksum_fails(tmp_path, monkeypatch):
     locations = _configure(tmp_path, monkeypatch)
     _working_copy(tmp_path)
-    archived = locations["archive"] / "Camera Originals" / "Shoot" / "card" / "contents" / "CLIP" / "A001.MP4"
+    archived = locations["archive"] / "Video" / "RAW" / "Shoot" / "A001.MP4"
     archived.write_bytes(b"different-content")
     adapter = FakeResolveAdapter()
     monkeypatch.setattr(vflow_main, "get_resolve_adapter", lambda: adapter)

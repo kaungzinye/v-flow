@@ -70,7 +70,7 @@ You can say:
 
 > Ingest this card using v-flow.
 
-In v-flow, **ingest** means preserving one card or source folder in the Archive while leaving the source unchanged.
+In v-flow, **ingest** means copying the footage from one card or source folder into the Archive while leaving the source unchanged.
 
 ```bash
 v-flow ingest --source "/Volumes/SDCARD" --shoot "2026-08-02_Stockholm"
@@ -78,7 +78,16 @@ v-flow ingest --source "/Volumes/SDCARD" --shoot "2026-08-02_Stockholm"
 
 The name `2026-08-02_Stockholm` identifies the **Shoot**: footage captured in a certain date range and stored as one named collection.
 
-Each individual card or folder copied into that Shoot becomes an **Import Batch**. v-flow keeps the received folder structure and companion files together, then writes a checksum manifest that proves what reached the Archive.
+Footage lands flat in `Video/RAW/2026-08-02_Stockholm/`, so the folder looks like any hand-made shoot:
+
+```
+Video/RAW/2026-08-02_Stockholm/
+├── C6634.MP4
+├── C6635.MP4
+└── .vflow-manifest.json
+```
+
+The hidden manifest carries the safety layer: a SHA-256 checksum per file, the path it came from on the card, the **Import Batch** it arrived in, and the sidecars, thumbnails, and card databases that stayed behind. Pass `--include-all` to preserve those extras in a hidden folder inside the Shoot. Ingest hashes each file while copying it, so the card is read once, and verifies every archived file by re-reading it on the Archive. A clip whose content is already archived is skipped and recorded as a duplicate; a clip that shares a name with different content lands as `C6634_b.MP4`.
 
 After a successful ingest:
 
@@ -188,7 +197,7 @@ For example:
 | Copy something out of the Archive | Restore |
 | Inspect possible duplicates without deleting them | List duplicates |
 
-If the source is a camera card, use Ingest because it preserves the received hierarchy and records an Import Batch. Use Backup for an ordinary folder that is not a new card ingest.
+If the source is a camera card, use Ingest because it records every copied file in the Shoot manifest. Use Backup for an ordinary folder that is not a new card ingest.
 
 ## Other useful commands
 
@@ -211,7 +220,7 @@ v-flow verify-backup --source "/Users/you/Desktop/Footage" --destination "/Volum
 Restore archived files:
 
 ```bash
-v-flow restore --source "Camera Originals/2026-08-02_Stockholm" --destination "/Users/you/Desktop/Recovered" --dry-run
+v-flow restore --source "Video/RAW/2026-08-02_Stockholm" --destination "/Users/you/Desktop/Recovered" --dry-run
 ```
 
 Inspect duplicate candidates without deleting anything:

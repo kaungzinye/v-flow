@@ -59,11 +59,11 @@ def test_ingest_with_files_range_filter(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
 
-    # The selected files live beneath one immutable Import Batch.
-    shoot = archive_root / "Camera Originals" / "TestShoot"
-    batches = list(shoot.iterdir())
-    assert len(batches) == 1
-    archived_files = sorted(p.name for p in (batches[0] / "contents").iterdir() if p.is_file())
+    # The selected files land flat in the Shoot folder.
+    shoot = archive_root / "Video" / "RAW" / "TestShoot"
+    archived_files = sorted(
+        p.name for p in shoot.iterdir() if p.is_file() and not p.name.startswith(".")
+    )
     assert len(archived_files) == 50
     assert archived_files[0] == "C3300.MP4"
     assert archived_files[-1] == "C3349.MP4"

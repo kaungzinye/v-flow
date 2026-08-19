@@ -38,12 +38,7 @@ def _cleanup_plan(
     files = []
     for entry in entries:
         archived = entry["source"]
-        working = (
-            target
-            / entry["import_batch_id"]
-            / "contents"
-            / entry["relative_path"]
-        )
+        working = target / entry["name"]
         planned = {
             "working": working,
             "archive": archived,

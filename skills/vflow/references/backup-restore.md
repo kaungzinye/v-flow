@@ -1,6 +1,6 @@
 # Back up or restore an ordinary folder
 
-Use this branch for an existing folder that is not a newly received camera card. A camera card belongs in Ingest because Ingest preserves the received hierarchy and records it as an Import Batch.
+Use this branch for an existing folder that is not a newly received camera card. A camera card belongs in Ingest because Ingest records every copied file in the Shoot manifest.
 
 In this branch, **Backup** copies an ordinary folder into the configured long-term Archive and keeps the source. **Restore** copies something out of the Archive and also keeps the archived source.
 
