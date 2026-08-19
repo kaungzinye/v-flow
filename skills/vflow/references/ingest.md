@@ -2,7 +2,7 @@
 
 **Ingest** copies one card or source folder into protected long-term storage while leaving the source unchanged. It reads the whole source once and routes by media kind: footage into a **Shoot**, photos and their editing sidecars into a **Collection**.
 
-A Shoot is footage captured in a certain date range, held as one flat folder at `Video/RAW/<shoot>/`. A Collection is the matching group of photos, held as one flat folder at `Photo/RAW/<collection>/`. Each folder carries a hidden `.vflow-manifest.json` recording checksums and provenance, so duplicate detection is proof by content, never by filename. Several cards ingested under one name merge into the same flat folders; each card is recorded as its own **Import Batch** inside every manifest it writes.
+A Shoot is footage captured in a certain date range, held as one flat folder at `Video/RAW/<shoot>/` by default. A Collection is the matching group of photos, held as one flat folder at `Photo/RAW/<collection>/` by default. Both roots are configurable; [setup.md](setup.md) covers the layout keys, and `v-flow locations` reports the layout in force. Each folder carries a hidden `.vflow-manifest.json` recording checksums and provenance, so duplicate detection is proof by content, never by filename. Several cards ingested under one name merge into the same flat folders; each card is recorded as its own **Import Batch** inside every manifest it writes.
 
 1. Resolve the exact card or source path and the Shoot name. The Collection carries the Shoot name, so ask for `--collection` only when the user wants the photos under a different name. Let v-flow derive a date-based name for both with `--auto` only when the user chooses that behavior.
 
@@ -32,7 +32,7 @@ A Shoot is footage captured in a certain date range, held as one flat folder at 
 ## Repeated and overlapping ingests
 
 - Re-running the same ingest resumes from the manifests: files already archived and verified are not read from the card again.
-- A clip whose content is already archived anywhere in `Video/RAW`, or a photo whose content is already archived anywhere in `Photo/RAW`, is skipped and recorded as deduplicated with a pointer to the existing file. Matching name and size alone never justifies a skip.
+- A clip whose content is already archived anywhere under the footage root, or a photo whose content is already archived anywhere under the photo root, is skipped and recorded as deduplicated with a pointer to the existing file. Matching name and size alone never justifies a skip.
 - A file that shares a name with different existing content lands with a suffix, such as `C6634_b.MP4`, and the manifest keeps its original name. A deduplicated photo's sidecars follow it to the copy it matched.
 
 ## Safety gates

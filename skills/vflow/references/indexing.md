@@ -2,6 +2,8 @@
 
 Folders ingested by v-flow carry a Shoot Manifest from the start. Folders that predate v-flow have none, so checksum verification cannot vouch for them. **Indexing** hashes their files where they sit and writes the manifest — it moves nothing, renames nothing, and adds one hidden file per folder.
 
+Indexing walks the flat folders under the configured footage and photo roots, `Video/RAW` and `Photo/RAW` by default; [setup.md](setup.md) covers changing them.
+
 Ingest already handles look-alike candidates in unindexed folders on its own, one file at a time. Run a full index when the user wants whole-archive coverage: trustworthy card verification, or a duplicate sweep across old folders.
 
 1. Preview the work first:

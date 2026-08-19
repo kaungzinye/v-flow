@@ -23,9 +23,16 @@ Explain the storage choices before asking for paths:
 
    Complete when the long-term Archive, Exports folder, at least one editing location, and laptop free-space reserve are explicit.
 
+   Two optional keys name where each media kind sits inside the Archive. Set them only when the user wants a layout other than the default, and keep each value a relative subpath of the Archive:
+
+   ```bash
+   v-flow set layout.footage_raw <subpath>   # default Video/RAW
+   v-flow set layout.photo_raw <subpath>     # default Photo/RAW
+   ```
+
 3. Run `v-flow locations` again.
 
-   Complete when the CLI accepts the configuration and unavailable drives are clearly identified without changing their saved paths.
+   Complete when the CLI accepts the configuration, its reported Archive layout is the one the user wants, and unavailable drives are clearly identified without changing their saved paths.
 
 ## Refresh the installed skill
 

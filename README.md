@@ -78,7 +78,7 @@ v-flow ingest --source "/Volumes/SDCARD" --shoot "2026-08-02_Stockholm"
 
 The name `2026-08-02_Stockholm` identifies the **Shoot**: footage captured in a certain date range and stored as one named collection.
 
-Footage lands flat in `Video/RAW/2026-08-02_Stockholm/`, so the folder looks like any hand-made shoot:
+Footage lands flat in `Video/RAW/2026-08-02_Stockholm/` by default, so the folder looks like any hand-made shoot:
 
 ```
 Video/RAW/2026-08-02_Stockholm/
@@ -95,7 +95,7 @@ After a successful ingest:
 - the card or source folder remains unchanged;
 - no footage has been copied to your editing SSD yet.
 
-Photos from the same card land flat in `Photo/RAW/2026-08-02_Stockholm/` with their editing sidecars (`.pp3`, `.xmp`) beside them and a manifest of their own. Pass `--collection` to name that folder separately. A card without photos creates no Collection, and a card without footage creates no Shoot.
+Photos from the same card land flat in `Photo/RAW/2026-08-02_Stockholm/` with their editing sidecars (`.pp3`, `.xmp`) beside them and a manifest of their own. Both roots are yours to choose — `v-flow set layout.footage_raw <subpath>` and `v-flow set layout.photo_raw <subpath>` move them anywhere inside the Archive, and `v-flow locations` reports the layout in force. Pass `--collection` to name that folder separately. A card without photos creates no Collection, and a card without footage creates no Shoot.
 
 Use `--auto` instead of `--shoot` when you want v-flow to derive the name of both from media dates.
 
