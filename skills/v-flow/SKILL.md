@@ -1,5 +1,5 @@
 ---
-name: vflow
+name: v-flow
 description: v-flow stores and moves video footage and photos safely. Use whenever v-flow comes up, or when the user wants to set up media drives, copy a camera card, archive or restore media, free editing space, or find duplicates.
 ---
 

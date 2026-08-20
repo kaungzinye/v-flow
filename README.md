@@ -62,7 +62,7 @@ This is a personal tool that grew documentation. It works on macOS, it's tested,
 
 ## Docs
 
-- [The agent skill](skills/vflow/SKILL.md): the workflow reference, branch by branch
+- [The agent skill](skills/v-flow/SKILL.md): the workflow reference, branch by branch
 - [Domain language](CONTEXT.md): what Shoot, Collection, Archive, and friends mean precisely
 - Every command: `v-flow --help`
 
