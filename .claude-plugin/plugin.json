@@ -1,7 +1,7 @@
 {
   "name": "v-flow",
   "description": "Automates uploading your camera cards onto archive and editing drives, organized into date-named shoots. Never deletes the last safe copy. Works with DaVinci Resolve.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": {
     "name": "Kaung",
     "email": "kaungzinye@gmail.com",

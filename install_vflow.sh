@@ -77,6 +77,7 @@ TARGETS+=("$HOME/.claude/skills")
 TARGETS+=("$HOME/.cursor/skills")
 
 RETIRED_SKILLS=(
+  vflow
   vflow-backup-cleanup-assistant
   vflow-delivery-tagging-assistant
   vflow-ingest-project-assistant
