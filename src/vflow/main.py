@@ -232,7 +232,7 @@ def card_report_cmd(
     """
     Shows what's on a card, grouped by date.
 
-    Auto-detects the video folder (private/M4ROOT/CLIP) and photo folder (DCIM/100MSDCF).
+    Auto-detects the video folder (private/M4ROOT/CLIP) and every photo folder under DCIM.
     For each section, shows date, first/last filename, count, and whether video files
     are already in the archive.
     """
