@@ -525,7 +525,7 @@ def card_verify(
         raise typer.Exit(code=1)
 
     video_folder = source_path / "private" / "M4ROOT" / "CLIP"
-    photo_folder = source_path / "DCIM" / "100MSDCF"
+    photo_folder = source_path / "DCIM"
 
     video_extensions = {".mp4", ".mov", ".mxf", ".mts", ".avi", ".m4v", ".braw", ".r3d", ".crm"}
     photo_extensions = PHOTO_EXTENSIONS
